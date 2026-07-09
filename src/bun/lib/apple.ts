@@ -42,10 +42,30 @@ function cacheDir(): string {
 const NUL = String.fromCharCode(0)
 let resolved: string | null | undefined
 
+/** Versão principal do macOS (ex.: 15), ou 0 se não for macOS/indeterminado. */
+async function macosMajor(): Promise<number> {
+  try {
+    const proc = Bun.spawn(['sw_vers', '-productVersion'], { stdout: 'pipe', stderr: 'ignore' })
+    const out = (await new Response(proc.stdout).text()).trim()
+    await proc.exited
+    return parseInt(out.split('.')[0], 10) || 0
+  } catch {
+    return 0
+  }
+}
+
 /** Caminho do helper appletranslate, compilando sob demanda. null = indisponível. */
 export async function resolveAppleTranslate(): Promise<string | null> {
   if (process.platform !== 'darwin') return null
   if (resolved !== undefined) return resolved
+
+  // O framework Translation existe só no macOS 15+. Em versões anteriores o
+  // helper nem carrega (dyld não acha Translation.framework), então marca
+  // indisponível — evita anunciar o provedor Apple e falhar no uso.
+  if ((await macosMajor()) < 15) {
+    resolved = null
+    return null
+  }
 
   // 1. binário pré-compilado embutido no app (Contents/Resources/app/appletranslate).
   const bundled = joinPath(process.cwd(), '..', 'Resources', 'app', 'appletranslate')

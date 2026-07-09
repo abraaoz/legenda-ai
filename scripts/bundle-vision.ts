@@ -48,16 +48,22 @@ const HELPERS: Array<{ name: string; src: string }> = [
   { name: 'appletranslate', src: 'src/bun/native/appletranslate.swift' }
 ]
 
+let compiled = 0
 for (const { name, src } of HELPERS) {
   const out = `${appDir}/Contents/Resources/app/${name}`
   console.log(`[native] compilando ${src} → ${out}`)
   const proc = Bun.spawn([swiftc, '-O', src, '-o', out], { stdout: 'inherit', stderr: 'inherit' })
-  if ((await proc.exited) !== 0) {
-    console.error(`[native] falha ao compilar ${name}.`)
-    process.exit(1)
+  if ((await proc.exited) === 0) {
+    compiled++
+  } else {
+    // NÃO aborta o build: cada helper tem fallback de compile-on-demand (fonte
+    // Swift em base64 na lib). Ex.: appletranslate exige o SDK do macOS 15
+    // (framework Translation); em runners/SDKs antigos (ex.: Intel no macOS 13)
+    // ele é pulado aqui e compilado sob demanda no primeiro uso.
+    console.warn(`[native] AVISO: não compilou ${name} — seguindo sem embuti-lo (fallback compile-on-demand).`)
   }
 }
-console.log('[native] helpers nativos embutidos no app ✅')
+console.log(`[native] ${compiled}/${HELPERS.length} helper(s) nativo(s) embutido(s) ✅`)
 
 // Linha de contato no painel "Sobre" (About) — o painel padrão do macOS exibe
 // NSHumanReadableCopyright abaixo da versão, com estilo adaptável a light/dark.
