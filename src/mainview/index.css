@@ -300,11 +300,6 @@ body {
   color: #1a1400;
 }
 
-.badge-ai {
-  background: var(--ok);
-  color: #04351f;
-}
-
 button {
   font: inherit;
   border-radius: 8px;

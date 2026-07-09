@@ -92,7 +92,7 @@ git tag v1.0.0 && git push origin v1.0.0
 4. Modo AI (numa faixa embutida):
    - **Extrair .srt** → salva a legenda embutida sincronizada.
    - **Traduzir → \<idioma\> (IA)** → extrai e traduz via Ollama, com barra de
-     progresso, salvando `nome.<idioma>.ai.srt` com os mesmos timestamps.
+     progresso, salvando `nome.<idioma>.srt` com os mesmos timestamps.
 
 ## Estrutura
 

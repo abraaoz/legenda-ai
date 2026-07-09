@@ -9,11 +9,13 @@ import { findExternalSubtitles } from './files'
 import { logd, logi } from './logger'
 import { hasOcr } from './ocr'
 import { basename, dirname, extname, joinPath } from './paths'
+import { version } from '../../shared/version'
 
 const API_BASE = 'https://api.opensubtitles.com/api/v1'
 // Deve ser o nome EXATO do consumer registrado no OpenSubtitles + versão,
-// senão a API retorna 403 "User-Agent header is wrong".
-const USER_AGENT = 'legendaAIpramim v1.1.0'
+// senão a API retorna 403 "User-Agent header is wrong". Validação é pelo NOME;
+// a versão vem do package.json (fonte única, via shared/version).
+const USER_AGENT = `legendaAIpramim v${version}`
 const HASH_CHUNK_SIZE = 65536 // 64 KiB lidos no início e no fim do arquivo
 const U64_MASK = 0xffffffffffffffffn
 

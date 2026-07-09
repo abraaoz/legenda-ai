@@ -706,9 +706,6 @@ export default function App() {
                                   {srt.language.toUpperCase()}
                                 </span>
                               )}
-                              {srt.aiTranslated && (
-                                <span className="badge badge-ai">IA</span>
-                              )}
                               {srt.name}
                             </span>
                             <span className="muted">{fileSize(srt.size)}</span>

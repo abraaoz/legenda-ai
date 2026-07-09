@@ -34,8 +34,8 @@ export async function listVideosInFolder(dir: string): Promise<string[]> {
 /**
  * Encontra legendas .srt EXTERNAS ao lado do vídeo — arquivos com o mesmo
  * nome-base na mesma pasta (convenção dos players e do próprio app):
- *   Filme.mkv → Filme.srt, Filme.en.srt, Filme.pt-br.srt, Filme.pt-br.ai.srt …
- * Extrai o token de idioma do sufixo e marca as traduções do app (".ai.srt").
+ *   Filme.mkv → Filme.srt, Filme.en.srt, Filme.pt-br.srt …
+ * Extrai o token de idioma do sufixo (parte entre o nome-base e ".srt").
  */
 export async function findExternalSubtitles(videoPath: string): Promise<ExternalSubtitle[]> {
   const dir = dirname(videoPath)
@@ -49,18 +49,12 @@ export async function findExternalSubtitles(videoPath: string): Promise<External
     const stemLc = stem.toLowerCase()
     // Só os que casam com o nome do vídeo: "Filme" ou "Filme.<sufixo>".
     if (stemLc !== baseLc && !stemLc.startsWith(baseLc + '.')) continue
-    let suffix = stem.length === base.length ? '' : stem.slice(base.length + 1)
-    let aiTranslated = false
-    if (suffix.toLowerCase().endsWith('.ai')) {
-      aiTranslated = true
-      suffix = suffix.slice(0, -3)
-    }
+    const suffix = stem.length === base.length ? '' : stem.slice(base.length + 1)
     found.push({
       path: joinPath(dir, name),
       name,
       size: Bun.file(joinPath(dir, name)).size,
-      language: suffix,
-      aiTranslated
+      language: suffix
     })
   }
   return found.sort((a, b) => a.name.localeCompare(b.name))

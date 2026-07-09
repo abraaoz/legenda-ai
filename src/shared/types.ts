@@ -27,8 +27,6 @@ export interface ExternalSubtitle {
   size: number
   /** Token de idioma extraído do nome (ex.: "en", "pt-br", "eng") ou '' se não houver. */
   language: string
-  /** true se for uma tradução gerada por este app (arquivo ".<lang>.ai.srt"). */
-  aiTranslated: boolean
 }
 
 export interface VideoInfo {

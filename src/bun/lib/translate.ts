@@ -162,7 +162,7 @@ async function produceSourceSrt(
 
 /**
  * Estado de uma tradução: quantas falas já estão em disco (done) vs. total da
- * fonte. Só faz trabalho pesado se já existir um .ai.srt parcial.
+ * fonte. Só faz trabalho pesado se já existir um .<idioma>.srt parcial.
  */
 export async function getTranslationStatus(
   path: string,
@@ -188,7 +188,7 @@ export async function getTranslationStatus(
 /**
  * Fluxo de tradução, idempotente e retomável: extrai a legenda embutida
  * (100% sincronizada), traduz em lotes preservando os timestamps e grava
- * "<nome>.<idioma-alvo>.ai.srt" a CADA lote. Se já existir um parcial alinhado,
+ * "<nome>.<idioma-alvo>.srt" a CADA lote. Se já existir um parcial alinhado,
  * retoma de onde parou. Cancelar mantém o que já foi traduzido em disco.
  */
 export async function aiTranslateEmbedded(
