@@ -205,8 +205,8 @@ export async function aiTranslateEmbedded(
 
   // 2. retoma de um parcial existente, se ele alinhar com a fonte (mesmos timestamps)
   const targetPath = targetSrtPath(args.path, args.targetCode)
-  // Sem o sufixo .ai, origem e destino podem coincidir se os idiomas forem
-  // iguais — não sobrescreve a fonte com ela mesma.
+  // Origem e destino podem coincidir se os idiomas forem iguais — não
+  // sobrescreve a fonte com ela mesma.
   if (targetPath === sourceSrt) {
     throw new Error('Idioma de origem e destino são iguais — nada a traduzir.')
   }
