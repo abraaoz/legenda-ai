@@ -1,0 +1,13 @@
+node_modules
+build
+artifacts
+*.log
+.DS_Store
+.env
+.env.*
+
+# Cache de build compilado do Bun
+*.bun-build
+
+# Config local do Claude Code (por-máquina)
+.claude/settings.local.json

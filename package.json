@@ -1,0 +1,30 @@
+{
+  "name": "legenda-ai-pra-mim",
+  "version": "1.0.0",
+  "description": "App desktop (macOS/Windows/Linux) em Bun + Electrobun para baixar legendas sincronizadas de arquivos de vídeo.",
+  "module": "src/bun/index.ts",
+  "type": "module",
+  "private": true,
+  "author": "Abraão Zaidan",
+  "license": "MIT",
+  "scripts": {
+    "dev": "electrobun dev",
+    "dev:watch": "electrobun dev --watch",
+    "start": "electrobun run",
+    "build": "electrobun build",
+    "build:canary": "electrobun build --env=canary",
+    "build:stable": "electrobun build --env=stable",
+    "typecheck": "bunx tsc --noEmit"
+  },
+  "dependencies": {
+    "electrobun": "^1.18.1",
+    "react": "^19.2.7",
+    "react-dom": "^19.2.7"
+  },
+  "devDependencies": {
+    "@types/bun": "^1.3.14",
+    "@types/react": "^19.2.17",
+    "@types/react-dom": "^19.2.3",
+    "typescript": "^7.0.2"
+  }
+}
