@@ -17,6 +17,20 @@ export interface EmbeddedSubtitle {
   isForced: boolean
 }
 
+/** Legenda .srt externa (arquivo ao lado do vídeo, mesmo nome-base). */
+export interface ExternalSubtitle {
+  /** Caminho absoluto do arquivo .srt. */
+  path: string
+  /** Nome do arquivo (com extensão). */
+  name: string
+  /** Tamanho em bytes. */
+  size: number
+  /** Token de idioma extraído do nome (ex.: "en", "pt-br", "eng") ou '' se não houver. */
+  language: string
+  /** true se for uma tradução gerada por este app (arquivo ".<lang>.ai.srt"). */
+  aiTranslated: boolean
+}
+
 export interface VideoInfo {
   /** Caminho absoluto do arquivo de vídeo no disco. */
   path: string
@@ -28,6 +42,8 @@ export interface VideoInfo {
   hash: string
   /** Faixas de legenda já embutidas no arquivo (via ffprobe). */
   embedded: EmbeddedSubtitle[]
+  /** Legendas .srt externas encontradas ao lado do vídeo (mesmo nome-base). */
+  external: ExternalSubtitle[]
   /** true se o ffmpeg/ffprobe foi encontrado na máquina. */
   ffmpegAvailable: boolean
   /** true se há OCR disponível (Vision no macOS, ou Tesseract) para legendas em imagem. */

@@ -2,7 +2,7 @@ import { ApplicationMenu, BrowserView, BrowserWindow, Utils } from 'electrobun/b
 import type { LegendaRPC } from '../shared/rpc'
 import type { AppSettings, LogEntry } from '../shared/types'
 import { checkDependencies } from './lib/dependencies'
-import { listVideosInFolder } from './lib/files'
+import { findExternalSubtitles, listVideosInFolder } from './lib/files'
 import { extractEmbedded } from './lib/ffmpeg'
 import { saveFileDialog } from './lib/savedialog'
 import { getLogBuffer, loge, logi, setLogSink } from './lib/logger'
@@ -122,6 +122,9 @@ const rpc = BrowserView.defineRPC<LegendaRPC>({
       validateApiKey: logged('validateApiKey', ({ apiKey }) => validateApiKey(apiKey)),
       extractEmbedded: logged('extractEmbedded', ({ path, index, language, isText }) =>
         extractEmbedded(path, index, language, isText)
+      ),
+      listExternalSubtitles: logged('listExternalSubtitles', ({ path }) =>
+        findExternalSubtitles(path)
       ),
       openExternal: logged('openExternal', ({ url }) => Utils.openExternal(url)),
       readClipboard: () => Utils.clipboardReadText() ?? '',

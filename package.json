@@ -1,6 +1,6 @@
 {
   "name": "legenda-ai-pra-mim",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "App desktop (macOS/Windows/Linux) em Bun + Electrobun para baixar legendas sincronizadas de arquivos de vídeo.",
   "module": "src/bun/index.ts",
   "type": "module",

@@ -178,6 +178,21 @@ body {
   margin: 20px 0 0;
 }
 
+.list-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 20px;
+}
+
+.list-toolbar .list-count {
+  margin: 0;
+}
+
+.toolbar-spacer {
+  flex: 1;
+}
+
 .list {
   display: flex;
   flex-direction: column;
@@ -283,6 +298,11 @@ body {
 .badge-img {
   background: var(--warn);
   color: #1a1400;
+}
+
+.badge-ai {
+  background: var(--ok);
+  color: #04351f;
 }
 
 button {

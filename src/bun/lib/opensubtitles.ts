@@ -5,6 +5,7 @@ import type {
   VideoInfo
 } from '../../shared/types'
 import { hasFfmpeg, listEmbeddedSubtitles } from './ffmpeg'
+import { findExternalSubtitles } from './files'
 import { logd, logi } from './logger'
 import { hasOcr } from './ocr'
 import { basename, dirname, extname, joinPath } from './paths'
@@ -12,7 +13,7 @@ import { basename, dirname, extname, joinPath } from './paths'
 const API_BASE = 'https://api.opensubtitles.com/api/v1'
 // Deve ser o nome EXATO do consumer registrado no OpenSubtitles + versão,
 // senão a API retorna 403 "User-Agent header is wrong".
-const USER_AGENT = 'legendaAIpramim v1.0.0'
+const USER_AGENT = 'legendaAIpramim v1.1.0'
 const HASH_CHUNK_SIZE = 65536 // 64 KiB lidos no início e no fim do arquivo
 const U64_MASK = 0xffffffffffffffffn
 
@@ -55,9 +56,12 @@ export async function analyzeVideo(path: string): Promise<VideoInfo> {
   const hash = await computeOpenSubtitlesHash(path, size)
   const ffmpegAvailable = await hasFfmpeg()
   const embedded = ffmpegAvailable ? await listEmbeddedSubtitles(path) : []
+  const external = await findExternalSubtitles(path)
   const ocrAvailable = await hasOcr()
-  logi(`hash=${hash} · ${(size / 1024 ** 2).toFixed(0)} MB · ${embedded.length} legenda(s) embutida(s)`)
-  return { path, name: basename(path), size, hash, embedded, ffmpegAvailable, ocrAvailable }
+  logi(
+    `hash=${hash} · ${(size / 1024 ** 2).toFixed(0)} MB · ${embedded.length} embutida(s) · ${external.length} .srt externa(s)`
+  )
+  return { path, name: basename(path), size, hash, embedded, external, ffmpegAvailable, ocrAvailable }
 }
 
 /**

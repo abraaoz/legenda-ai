@@ -4,7 +4,7 @@ export default {
   app: {
     name: 'Legenda AI pra mim',
     identifier: 'com.legendaaipramim.app',
-    version: '1.0.0'
+    version: '1.1.0'
   },
   runtime: {
     exitOnLastWindowClosed: true

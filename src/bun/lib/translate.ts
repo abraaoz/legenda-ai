@@ -125,10 +125,11 @@ export interface TranslateEmbeddedArgs {
   isText: boolean
 }
 
-/** Caminho do .srt traduzido para um vídeo + idioma alvo. */
+/** Caminho do .srt traduzido para um vídeo + idioma alvo. Nome "limpo"
+ * (<base>.<idioma>.srt) para os players carregarem automaticamente. */
 function targetSrtPath(path: string, targetCode: string): string {
   const base = basename(path, extname(path))
-  return joinPath(dirname(path), `${base}.${targetCode}.ai.srt`)
+  return joinPath(dirname(path), `${base}.${targetCode}.srt`)
 }
 
 /** Caminho do .srt de origem (texto extraído ou OCR). */
@@ -204,6 +205,11 @@ export async function aiTranslateEmbedded(
 
   // 2. retoma de um parcial existente, se ele alinhar com a fonte (mesmos timestamps)
   const targetPath = targetSrtPath(args.path, args.targetCode)
+  // Sem o sufixo .ai, origem e destino podem coincidir se os idiomas forem
+  // iguais — não sobrescreve a fonte com ela mesma.
+  if (targetPath === sourceSrt) {
+    throw new Error('Idioma de origem e destino são iguais — nada a traduzir.')
+  }
   const translated: Cue[] = []
   if (await Bun.file(targetPath).exists()) {
     const parsed = parseSrt(await Bun.file(targetPath).text())

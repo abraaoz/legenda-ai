@@ -60,6 +60,7 @@ export const api = {
   importSettings: () => call.importSettings({}),
   validateApiKey: (apiKey: string) => call.validateApiKey({ apiKey }),
   extractEmbedded: (args: ExtractArgs) => call.extractEmbedded(args),
+  listExternalSubtitles: (path: string) => call.listExternalSubtitles({ path }),
   openExternal: (url: string) => call.openExternal({ url }),
   readClipboard: () => call.readClipboard({}),
   listAiModels: () => call.listAiModels({}),

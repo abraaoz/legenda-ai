@@ -34,6 +34,42 @@ const LANGUAGES: Array<{ code: string; label: string }> = [
 
 type VideoStatus = "analyzing" | "ready" | "error";
 
+// Fila de tradução: no máximo 2 rodando ao mesmo tempo, o resto aguarda.
+// (Ollama serializa num único modelo; Azure tem rate limit; OCR disputa CPU —
+// então limitar a concorrência evita thrashing/429 e mantém previsível.)
+const MAX_CONCURRENT = 2;
+let qActive = 0;
+let qPending: Array<{ key: string; start: () => void }> = [];
+function qPump(): void {
+  while (qActive < MAX_CONCURRENT && qPending.length > 0) {
+    qActive++;
+    qPending.shift()!.start();
+  }
+}
+function qEnqueue(key: string, task: () => Promise<void>): void {
+  qPending.push({
+    key,
+    start: () => {
+      void task().finally(() => {
+        qActive--;
+        qPump();
+      });
+    },
+  });
+  qPump();
+}
+/** Remove da fila os itens ainda não iniciados; devolve as chaves removidas. */
+function qClearPending(): string[] {
+  const keys = qPending.map((p) => p.key);
+  qPending = [];
+  return keys;
+}
+/** Remove um item específico da fila (se ainda não iniciou). */
+function qCancelPending(key: string): void {
+  const i = qPending.findIndex((p) => p.key === key);
+  if (i >= 0) qPending.splice(i, 1);
+}
+
 interface VideoState {
   id: string;
   path: string;
@@ -46,6 +82,8 @@ interface VideoState {
   savedPath?: string;
   downloadingId?: number;
   extractingIndex?: number;
+  /** Faixa aguardando na fila de tradução (ainda não começou). */
+  queuedIndex?: number;
   translatingIndex?: number;
   translateDone?: number;
   translateTotal?: number;
@@ -63,6 +101,24 @@ function formatSize(bytes: number): string {
 
 function baseName(path: string): string {
   return path.split(/[\\/]/).pop() ?? path;
+}
+
+/** Tamanho legível para arquivos pequenos (legendas): B / KB / MB. */
+function fileSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`;
+  return `${(bytes / 1024 ** 2).toFixed(1)} MB`;
+}
+
+/** Pasta que contém o arquivo (sem depender de node:path). */
+function folderOf(path: string): string {
+  const i = Math.max(path.lastIndexOf("/"), path.lastIndexOf("\\"));
+  return i > 0 ? path.slice(0, i) : path;
+}
+
+/** URL file:// para abrir um caminho local no gerenciador de arquivos. */
+function fileUrl(path: string): string {
+  return `file://${path.split("/").map(encodeURIComponent).join("/")}`;
 }
 
 export default function App() {
@@ -140,6 +196,21 @@ export default function App() {
 
   function patch(id: string, next: Partial<VideoState>): void {
     setVideos((prev) => prev.map((v) => (v.id === id ? { ...v, ...next } : v)));
+  }
+
+  // Re-detecta as legendas .srt do disco (após baixar/extrair/traduzir, um novo
+  // arquivo pode ter surgido) e atualiza o card.
+  async function refreshExternal(id: string, path: string): Promise<void> {
+    try {
+      const external = await api.listExternalSubtitles(path);
+      setVideos((prev) =>
+        prev.map((v) =>
+          v.id === id && v.info ? { ...v, info: { ...v.info, external } } : v,
+        ),
+      );
+    } catch {
+      // silencioso — a lista externa é apenas informativa
+    }
   }
 
   async function addPaths(paths: string[]): Promise<void> {
@@ -237,6 +308,7 @@ export default function App() {
         result,
       });
       patch(video.id, { downloadingId: undefined, savedPath });
+      void refreshExternal(video.id, video.info.path);
     } catch (err) {
       patch(video.id, {
         downloadingId: undefined,
@@ -259,6 +331,7 @@ export default function App() {
         isText: sub.isText,
       });
       patch(video.id, { extractingIndex: undefined, savedPath });
+      void refreshExternal(video.id, video.info.path);
     } catch (err) {
       patch(video.id, {
         extractingIndex: undefined,
@@ -267,19 +340,27 @@ export default function App() {
     }
   }
 
-  async function aiTranslate(
-    video: VideoState,
-    sub: EmbeddedSubtitle,
-  ): Promise<void> {
+  // Enfileira uma tradução (marca "na fila" na hora; a fila roda no máx. 2).
+  function aiTranslate(video: VideoState, sub: EmbeddedSubtitle): void {
     if (!video.info) return;
     if (!sub.isText && !video.info.ocrAvailable) return;
     const info = video.info;
-    patch(video.id, {
+    patch(video.id, { queuedIndex: sub.index, message: undefined });
+    qEnqueue(`${video.id}:${sub.index}`, () => runTranslate(video.id, info, sub));
+  }
+
+  // Executa de fato a tradução (chamado pela fila quando há vaga).
+  async function runTranslate(
+    videoId: string,
+    info: VideoInfo,
+    sub: EmbeddedSubtitle,
+  ): Promise<void> {
+    patch(videoId, {
+      queuedIndex: undefined,
       translatingIndex: sub.index,
       translateDone: 0,
       translateTotal: 0,
       translatePhase: sub.isText ? "translate" : "ocr",
-      message: undefined,
     });
     try {
       const res = await api.aiTranslateEmbedded({
@@ -290,7 +371,7 @@ export default function App() {
       });
       setVideos((prev) =>
         prev.map((v) =>
-          v.id === video.id
+          v.id === videoId
             ? {
                 ...v,
                 translatingIndex: undefined,
@@ -303,8 +384,9 @@ export default function App() {
             : v,
         ),
       );
+      void refreshExternal(videoId, info.path);
     } catch (err) {
-      patch(video.id, {
+      patch(videoId, {
         translatingIndex: undefined,
         message: (err as Error).message,
       });
@@ -317,7 +399,7 @@ export default function App() {
       });
       setVideos((prev) =>
         prev.map((v) =>
-          v.id === video.id
+          v.id === videoId
             ? {
                 ...v,
                 translations: { ...(v.translations ?? {}), [sub.index]: st },
@@ -328,13 +410,45 @@ export default function App() {
     }
   }
 
+  // Enfileira UMA faixa por vídeo (a 1ª traduzível e ainda não concluída).
+  function translateAll(): void {
+    for (const video of videos) {
+      if (!video.info) continue;
+      if (video.translatingIndex !== undefined || video.queuedIndex !== undefined)
+        continue;
+      const sub = video.info.embedded.find((s) => {
+        const st = video.translations?.[s.index];
+        const complete = !!st && st.total > 0 && st.done >= st.total;
+        return (s.isText || video.info!.ocrAvailable) && !complete;
+      });
+      if (sub) aiTranslate(video, sub);
+    }
+  }
+
+  // Esvazia a fila (reseta "na fila") e aborta as traduções em andamento.
+  async function cancelAll(): Promise<void> {
+    qClearPending();
+    setVideos((prev) =>
+      prev.map((v) =>
+        v.queuedIndex !== undefined ? { ...v, queuedIndex: undefined } : v,
+      ),
+    );
+    const active = videos.filter(
+      (v) => v.translatingIndex !== undefined && v.info,
+    );
+    await Promise.all(active.map((v) => api.cancelTranslate(v.info!.path)));
+  }
+
   async function cancelTranslate(video: VideoState): Promise<void> {
     if (!video.info) return;
     await api.cancelTranslate(video.info.path);
   }
 
   async function removeVideo(video: VideoState): Promise<void> {
-    // Se houver tradução em andamento, cancela no backend antes de remover.
+    // Tira da fila (se aguardando) e cancela no backend (se em andamento).
+    if (video.queuedIndex !== undefined) {
+      qCancelPending(`${video.id}:${video.queuedIndex}`);
+    }
     if (video.translatingIndex !== undefined && video.info) {
       await api.cancelTranslate(video.info.path);
     }
@@ -397,11 +511,51 @@ export default function App() {
             )}
           </section>
 
-          {videos.length > 0 && (
-            <p className="list-count">
-              {videos.length} vídeo{videos.length > 1 ? "s" : ""} na lista
-            </p>
-          )}
+          {videos.length > 0 &&
+            (() => {
+              const anyBusy = videos.some(
+                (v) =>
+                  v.translatingIndex !== undefined ||
+                  v.queuedIndex !== undefined,
+              );
+              const canTranslateAny = videos.some(
+                (v) =>
+                  v.info &&
+                  v.translatingIndex === undefined &&
+                  v.queuedIndex === undefined &&
+                  v.info.embedded.some((s) => {
+                    const st = v.translations?.[s.index];
+                    const complete = !!st && st.total > 0 && st.done >= st.total;
+                    return (s.isText || v.info!.ocrAvailable) && !complete;
+                  }),
+              );
+              return (
+                <div className="list-toolbar">
+                  <p className="list-count">
+                    {videos.length} vídeo{videos.length > 1 ? "s" : ""} na lista
+                  </p>
+                  <span className="toolbar-spacer" />
+                  <span className="muted">Fila: até {MAX_CONCURRENT} por vez</span>
+                  {anyBusy && (
+                    <button className="ghost sm" onClick={cancelAll}>
+                      Cancelar tudo
+                    </button>
+                  )}
+                  <button
+                    className="primary sm"
+                    disabled={!aiReady || !canTranslateAny}
+                    title={
+                      aiReady
+                        ? `Traduzir 1 faixa de cada vídeo para ${targetLabel} (fila de ${MAX_CONCURRENT})`
+                        : "Configure o motor de tradução nas configurações"
+                    }
+                    onClick={translateAll}
+                  >
+                    Traduzir todos → {settings.language.toUpperCase()}
+                  </button>
+                </div>
+              );
+            })()}
 
           <section className="list">
             {videos.map((video) => (
@@ -446,6 +600,10 @@ export default function App() {
                         const st = video.translations?.[sub.index];
                         const translating =
                           video.translatingIndex === sub.index;
+                        const queued = video.queuedIndex === sub.index;
+                        const busy =
+                          video.translatingIndex !== undefined ||
+                          video.queuedIndex !== undefined;
                         const complete =
                           !!st && st.total > 0 && st.done >= st.total;
                         const partial =
@@ -509,28 +667,63 @@ export default function App() {
                                       : "Configure o motor de tradução (Ollama, Azure ou Apple) nas configurações"
                                 }
                                 disabled={
-                                  blockedImage ||
-                                  !aiReady ||
-                                  complete ||
-                                  (video.translatingIndex !== undefined &&
-                                    !translating)
+                                  blockedImage || !aiReady || complete || busy
                                 }
                                 onClick={() => aiTranslate(video, sub)}
                               >
                                 {blockedImage
                                   ? "Requer OCR"
-                                  : translating
-                                    ? "Processando…"
-                                    : complete
-                                      ? "✔ Traduzido"
-                                      : partial
-                                        ? `Continuar ${st!.done}/${st!.total}`
-                                        : `${image ? "OCR + Traduzir" : "Traduzir"} → ${settings.language.toUpperCase()}`}
+                                  : queued
+                                    ? "Na fila…"
+                                    : translating
+                                      ? "Processando…"
+                                      : complete
+                                        ? "✔ Traduzido"
+                                        : partial
+                                          ? `Continuar ${st!.done}/${st!.total}`
+                                          : `${image ? "OCR + Traduzir" : "Traduzir"} → ${settings.language.toUpperCase()}`}
                               </button>
                             </div>
                           </li>
                         );
                       })}
+                    </ul>
+                  </div>
+                )}
+
+                {video.info && video.info.external.length > 0 && (
+                  <div className="embedded">
+                    <p className="section-label">
+                      📄 Legendas .srt no disco (ao lado do vídeo)
+                    </p>
+                    <ul className="results">
+                      {video.info.external.map((srt) => (
+                        <li key={srt.path}>
+                          <div className="result-info">
+                            <span className="result-title">
+                              {srt.language && (
+                                <span className="badge">
+                                  {srt.language.toUpperCase()}
+                                </span>
+                              )}
+                              {srt.aiTranslated && (
+                                <span className="badge badge-ai">IA</span>
+                              )}
+                              {srt.name}
+                            </span>
+                            <span className="muted">{fileSize(srt.size)}</span>
+                          </div>
+                          <button
+                            className="ghost sm"
+                            title="Abrir a pasta do arquivo"
+                            onClick={() =>
+                              api.openExternal(fileUrl(folderOf(srt.path)))
+                            }
+                          >
+                            Abrir pasta
+                          </button>
+                        </li>
+                      ))}
                     </ul>
                   </div>
                 )}

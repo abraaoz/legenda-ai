@@ -5,6 +5,7 @@ import type {
   DependencyStatus,
   DownloadArgs,
   DownloadResult,
+  ExternalSubtitle,
   ExtractArgs,
   LogEntry,
   OllamaStatus,
@@ -34,6 +35,7 @@ export type LegendaRPC = {
       importSettings: { params: Record<string, never>; response: AppSettings }
       validateApiKey: { params: { apiKey: string }; response: ValidateResult }
       extractEmbedded: { params: ExtractArgs; response: DownloadResult }
+      listExternalSubtitles: { params: { path: string }; response: ExternalSubtitle[] }
       openExternal: { params: { url: string }; response: boolean }
       readClipboard: { params: Record<string, never>; response: string }
       listAiModels: { params: Record<string, never>; response: OllamaStatus }
