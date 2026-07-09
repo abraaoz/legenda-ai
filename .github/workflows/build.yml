@@ -7,6 +7,11 @@ on:
   push:
     tags: ['v*']
   workflow_dispatch:
+    inputs:
+      release_tag:
+        description: 'Publicar release com esta tag (ex.: v1.0.0). Vazio = só buildar, sem release.'
+        required: false
+        default: ''
 
 permissions:
   contents: write
@@ -58,7 +63,8 @@ jobs:
 
   release:
     name: Publicar release
-    if: startsWith(github.ref, 'refs/tags/v')
+    # Publica ao dar push de uma tag v*, OU num dispatch manual com release_tag preenchido.
+    if: startsWith(github.ref, 'refs/tags/v') || inputs.release_tag != ''
     needs: build
     runs-on: ubuntu-latest
     steps:
@@ -71,4 +77,6 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: artifacts/*
+          # Na tag: usa a própria tag. No dispatch: usa o input (cria a tag no commit atual).
+          tag_name: ${{ inputs.release_tag || github.ref_name }}
           generate_release_notes: true
