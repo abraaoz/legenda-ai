@@ -1,8 +1,10 @@
 name: build
 
-# Compila o app com Electrobun em cada SO nativo (macOS arm64/Intel, Windows,
-# Linux). Ao dar push de uma tag "v*", publica um Release com os artefatos
+# Compila o app com Electrobun em cada SO nativo (macOS arm64, Windows, Linux).
+# Ao dar push de uma tag "v*", publica um Release com os artefatos
 # (.dmg, instaladores, tarballs de update e update.json).
+# Nota: sem macOS Intel — os runners macos-13 (último Intel padrão) estão
+# escassos/em descontinuação e travam a fila; foco em Apple Silicon.
 on:
   push:
     tags: ['v*']
@@ -25,10 +27,8 @@ jobs:
       matrix:
         include:
           # macos-15 (arm64) tem o SDK do macOS 15 → compila o helper Apple
-          # (framework Translation). O Intel fica no macos-13 (último runner
-          # Intel padrão); lá o helper Apple é pulado (postBuild resiliente).
+          # (framework Translation) e o embute no bundle.
           - { name: macos-arm64, os: macos-15 }
-          - { name: macos-intel, os: macos-13 }
           - { name: windows-x64, os: windows-latest }
           - { name: linux-x64, os: ubuntu-22.04 }
     steps:

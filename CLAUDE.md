@@ -84,7 +84,7 @@ bun run build          # build de dev (build/dev-<os>-<arch>/<App>.app)
 bun run build:stable   # distribuição em artifacts/ (.dmg, .app.tar.zst, update.json)
 ```
 
-Distribuição é **por-plataforma-host** (build no próprio SO). CI: `.github/workflows/build.yml` roda `build:stable` em runners nativos (macOS arm64/Intel, Windows, Linux) e publica um Release ao dar push de uma tag `v*`.
+Distribuição é **por-plataforma-host** (build no próprio SO). CI: `.github/workflows/build.yml` roda `build:stable` em runners nativos (macOS arm64 em `macos-15` — precisa do SDK do macOS 15 pro helper Apple; Windows; Linux) e publica um Release ao dar push de uma tag `v*` **ou** por dispatch manual com o input `release_tag`. **Sem macOS Intel** (runners `macos-13` escassos/em descontinuação travavam a fila).
 
 ## Dependências externas
 
