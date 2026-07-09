@@ -1,4 +1,4 @@
-import { ApplicationMenu, BrowserView, BrowserWindow, Utils } from 'electrobun/bun'
+import { ApplicationMenu, BrowserView, BrowserWindow, Updater, Utils } from 'electrobun/bun'
 import type { LegendaRPC } from '../shared/rpc'
 import type { AppSettings, LogEntry } from '../shared/types'
 import { checkDependencies } from './lib/dependencies'
@@ -195,6 +195,7 @@ ApplicationMenu.setApplicationMenu([
     label: 'Legenda AI pra mim',
     submenu: [
       { role: 'about' },
+      { label: 'Buscar atualizações…', action: 'check-for-updates' },
       { type: 'separator' },
       { role: 'hide', accelerator: 'CmdOrCtrl+H' },
       { role: 'hideOthers' },
@@ -219,4 +220,37 @@ ApplicationMenu.setApplicationMenu([
 
 // A partir daqui, todo log() do backend também vai para a coluna de Log na UI.
 setLogSink((entry) => messenger()?.log(entry))
+
+// Auto-update (Electrobun): o menu "Buscar atualizações…" checa o release mais
+// novo no GitHub (release.baseUrl), baixa e aplica reiniciando. Cada mudança de
+// status vai para a coluna de Log. Em builds "dev" o Updater ignora (canal dev).
+Updater.onStatusChange((entry) => logi(`[update] ${entry.status}: ${entry.message}`))
+
+let updateChecking = false
+async function checkForUpdates(): Promise<void> {
+  if (updateChecking) return
+  updateChecking = true
+  try {
+    logi('Buscando atualizações…')
+    const info = await Updater.checkForUpdate()
+    if (!info.updateAvailable) {
+      logi(`Você já está na versão mais recente${info.version ? ` (${info.version})` : ''}.`)
+      return
+    }
+    logi(`Atualização disponível: ${info.version}. Baixando…`)
+    await Updater.downloadUpdate()
+    logi('Atualização baixada — aplicando e reiniciando…')
+    await Updater.applyUpdate()
+  } catch (err) {
+    loge(`Falha ao atualizar: ${(err as Error).message}`)
+  } finally {
+    updateChecking = false
+  }
+}
+
+ApplicationMenu.on('application-menu-clicked', (event) => {
+  const action = (event as { data?: { action?: string } })?.data?.action
+  if (action === 'check-for-updates') void checkForUpdates()
+})
+
 logi('App iniciado — backend pronto.')

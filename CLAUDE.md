@@ -56,6 +56,7 @@ src/
 │   └── api.ts                 # cliente RPC (Electroview) + assinatura de progresso
 ├── shared/
 │   ├── types.ts               # tipos de domínio
+│   ├── version.ts             # fonte ÚNICA da versão (importa package.json)
 │   └── rpc.ts                 # contrato RPC tipado (LegendaRPC)
 └── electrobun-shims.d.ts   # declare module 'three'/'babylonjs' (ver Gotchas)
 electrobun.config.ts        # app (name/identifier/version) + build (bun/views/copy/mac.icons)
@@ -86,6 +87,8 @@ bun run build:stable   # distribuição em artifacts/ (.dmg, .app.tar.zst, updat
 
 Distribuição é **por-plataforma-host** (build no próprio SO). CI: `.github/workflows/build.yml` roda `build:stable` em runners nativos (macOS arm64 em `macos-15` — precisa do SDK do macOS 15 pro helper Apple; Windows; Linux) e publica um Release ao dar push de uma tag `v*` **ou** por dispatch manual com o input `release_tag`. **Sem macOS Intel** (runners `macos-13` escassos/em descontinuação travavam a fila).
 
+**Auto-update** (Electrobun, embutido): `electrobun.config.ts#release.baseUrl` aponta pra `https://github.com/abraaoz/legenda-ai/releases/latest/download` (o GitHub redireciona `latest/download/<arquivo>` pro release mais novo; nossos artefatos não têm versão no nome, ex. `stable-macos-arm64-update.json`, então sempre pega o mais recente). `generatePatch: false` por ora (baixa o pacote inteiro; sem bsdiff). O menu **"Buscar atualizações…"** (`action: 'check-for-updates'` em `index.ts`) roda `Updater.checkForUpdate → downloadUpdate → applyUpdate` (aplica e reinicia); `Updater.onStatusChange` joga o status na coluna de Log. O Updater lê `Contents/Resources/version.json` (tem `baseUrl`/`channel`/`version`) do app **real** (dentro do tarball auto-extrator, não do stub). **Só canais `stable`/`canary` atualizam — `dev` é ignorado** (então não dá pra testar no `bun run dev`; precisa de um `.dmg` stable instalado + um release mais novo). App **não assinado** pode ser re-quarentenado pelo Gatekeeper ao atualizar — assinar/notarizar resolve.
+
 ## Dependências externas
 
 Detectadas em `dependencies.ts` e exibidas num **checklist visual** nas Configurações.
@@ -96,7 +99,8 @@ Detectadas em `dependencies.ts` e exibidas num **checklist visual** nas Configur
 
 ## Gotchas (aprendidos na marra)
 
-- **OpenSubtitles `User-Agent`**: precisa ser o **nome EXATO do consumer registrado** + versão (ex.: `legendaAIpramim v1.1.0`; a validação é pelo NOME, a versão acompanha o release), senão a API responde **403 "User-Agent header is wrong"** na busca/download. Está em `USER_AGENT` (`opensubtitles.ts`).
+- **OpenSubtitles `User-Agent`**: precisa ser o **nome EXATO do consumer registrado** + versão (ex.: `legendaAIpramim v1.1.0`; a validação é pelo NOME, a versão acompanha o release), senão a API responde **403 "User-Agent header is wrong"** na busca/download. Está em `USER_AGENT` (`opensubtitles.ts`), montado a partir de `shared/version`.
+- **Versão em fonte única**: a versão vive **só** no `package.json`; `src/shared/version.ts` faz `import { version } from '../../package.json'` e re-exporta. `electrobun.config.ts` (`app.version`) e o `USER_AGENT` importam de lá. **Para bumpar, edite APENAS o `package.json`** — nada de hardcode em `.ts`. (Bun/TS resolvem o named import do JSON nativamente; `resolveJsonModule` já ligado.)
 - **OpenSubtitles: query params em ordem alfabética.** `GET /subtitles` com parâmetros fora de ordem responde **301** para a URL ordenada. Sempre chamar `url.searchParams.sort()` antes do fetch.
 - **OpenSubtitles: `/infos/languages` NÃO valida a api-key** (responde 200 pra qualquer valor) — por isso `validateApiKey` bate em `/subtitles` (que checa de fato). O **403 "You cannot consume this service"** = api-key errada/inválida; erro clássico é colar a **URL** da página de consumers em vez da **API Key** (string). `validateApiKey` rejeita valores com `http`/`/`/espaço.
 

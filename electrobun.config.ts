@@ -1,10 +1,11 @@
 import type { ElectrobunConfig } from 'electrobun'
+import { version } from './src/shared/version'
 
 export default {
   app: {
     name: 'Legenda AI pra mim',
     identifier: 'com.legendaaipramim.app',
-    version: '1.1.0'
+    version
   },
   runtime: {
     exitOnLastWindowClosed: true
@@ -28,6 +29,16 @@ export default {
     mac: {
       icons: 'assets/icon.iconset'
     }
+  },
+  release: {
+    // Onde os artefatos de update vivem. A URL "latest/download" do GitHub
+    // sempre redireciona pro release MAIS NOVO; como nossos nomes de artefato
+    // não têm versão (ex.: stable-macos-arm64-update.json), o app checa sempre
+    // o update.json mais recente. (Só o canal "stable"/"canary" atualiza; "dev" não.)
+    baseUrl: 'https://github.com/abraaoz/legenda-ai/releases/latest/download',
+    // Sem patch delta por ora: o update baixa o pacote inteiro. Evita o
+    // ovo-e-galinha do bsdiff precisar do tarball da versão anterior no build.
+    generatePatch: false
   },
   scripts: {
     // Compila e embute o helper de OCR do macOS (Vision) no app bundle.
