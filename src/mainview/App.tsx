@@ -565,7 +565,7 @@ export default function App() {
     try {
       const devs = await api.castDiscover();
       setCastDevices(devs);
-      setPickDevice(devs[0]?.host ?? "");
+      setPickDevice(devs[0]?.id ?? "");
     } finally {
       setCastDiscovering(false);
     }
@@ -573,13 +573,16 @@ export default function App() {
 
   async function startCast(video: VideoState): Promise<void> {
     if (!video.info || !pickDevice) return;
-    const dev = castDevices.find((d) => d.host === pickDevice);
+    const dev = castDevices.find((d) => d.id === pickDevice);
+    if (!dev) return;
     const sub = video.info.external.find((s) => s.path === pickSub);
     setCastPickerFor(null);
     try {
       await api.castStart({
-        deviceHost: pickDevice,
-        deviceName: dev?.name ?? "TV",
+        deviceHost: dev.host,
+        deviceName: dev.name,
+        protocol: dev.protocol,
+        controlUrl: dev.controlUrl,
         videoPath: video.info.path,
         subtitlePath: sub?.path,
         subtitleLang: sub?.language || undefined,
@@ -801,7 +804,7 @@ export default function App() {
                       <span className="muted">Procurando dispositivos…</span>
                     ) : castDevices.length === 0 ? (
                       <span className="muted">
-                        Nenhum Chromecast encontrado na rede.
+                        Nenhuma TV encontrada na rede (Chromecast ou DLNA/Samsung).
                       </span>
                     ) : (
                       <div className="cast-picker-row">
@@ -812,8 +815,8 @@ export default function App() {
                             onChange={(e) => setPickDevice(e.target.value)}
                           >
                             {castDevices.map((d) => (
-                              <option key={d.id} value={d.host}>
-                                {d.name}
+                              <option key={`${d.protocol}:${d.id}`} value={d.id}>
+                                {d.protocol === "dlna" ? "📡" : "📺"} {d.name}
                                 {d.model ? ` (${d.model})` : ""}
                               </option>
                             ))}

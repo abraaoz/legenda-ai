@@ -183,13 +183,20 @@ export interface ValidateResult {
   message: string
 }
 
-/** Dispositivo Google Cast descoberto na LAN. */
+/** Protocolo de reprodução na TV. */
+export type CastProtocol = 'chromecast' | 'dlna'
+
+/** Dispositivo de reprodução descoberto na LAN (Chromecast ou DLNA/Samsung). */
 export interface CastDevice {
   name: string
   host: string
   port: number
   id: string
   model: string
+  /** Como falar com o aparelho: CASTV2 (Chromecast) ou UPnP/DLNA (Samsung etc.). */
+  protocol: CastProtocol
+  /** DLNA: URL de controle do serviço AVTransport (absoluta). */
+  controlUrl?: string
 }
 
 /** Estado de reprodução na TV (empurrado para a UI). */
@@ -205,6 +212,10 @@ export interface CastPlaybackStatus {
 export interface CastStartArgs {
   deviceHost: string
   deviceName: string
+  /** Protocolo do dispositivo selecionado. */
+  protocol: CastProtocol
+  /** DLNA: URL de controle do AVTransport (vem do CastDevice). */
+  controlUrl?: string
   videoPath: string
   subtitlePath?: string
   subtitleLang?: string

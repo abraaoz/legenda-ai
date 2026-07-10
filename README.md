@@ -18,9 +18,10 @@ dá, e sem enviar seus arquivos pra lugar nenhum.
   - **Azure** — na nuvem (precisa de uma conta Microsoft).
 - 👁️ **Lê legendas "em imagem"** de Blu-ray (aquelas que não são texto) e vira
   texto pra poder traduzir.
-- 📺 **Toca na TV (Chromecast)** — manda o vídeo **com a legenda** pra sua TV, e
-  ainda **converte na hora** formatos que a TV não aceita (ex.: filmes em x265),
-  com a barra de tempo funcionando (pular pra frente/trás).
+- 📺 **Toca na TV** — manda o vídeo **com a legenda** pra sua TV, seja
+  **Chromecast/Google TV** ou **Samsung Smart TV** (e outras TVs com DLNA), com
+  play/pause e a barra de tempo funcionando (pular pra frente/trás). Converte o
+  vídeo quando a TV não aceita o formato.
 
 ## Baixar e instalar
 

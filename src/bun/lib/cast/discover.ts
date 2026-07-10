@@ -123,12 +123,18 @@ function assemble(t: Tables): CastDevice[] {
     const host = t.a.get(srv.target)
     if (!host) continue
     const txt = t.txt.get(instance) ?? {}
+    // Descarta aparelhos SÓ de áudio (speakers, Chromecast Audio, grupos). O
+    // campo `ca` do mDNS é um bitmask de capacidades; o bit 0 (0x01) = saída de
+    // vídeo (validado: Gordocast/vídeo tem, Mi Smart Speaker/áudio não). Se `ca`
+    // não vier, mantém (não filtra sem certeza).
+    if (txt.ca !== undefined && (Number(txt.ca) & 0x01) === 0) continue
     devices.push({
       name: txt.fn || instance.split('.')[0] || 'Chromecast',
       host,
       port: srv.port || 8009,
       id: txt.id || instance,
-      model: txt.md || ''
+      model: txt.md || '',
+      protocol: 'chromecast'
     })
   }
   // dedup por id
@@ -244,4 +250,175 @@ export async function discoverCastDevices(timeoutMs = 2500): Promise<CastDevice[
   await Bun.sleep(timeoutMs - half)
   for (const s of sockets) s.close()
   return assemble(tables)
+}
+
+// ---------------------------------------------------------------------------
+// Descoberta DLNA/UPnP (Samsung Smart TV etc.) via SSDP — M-SEARCH multicast
+// para 239.255.255.250:1900 procurando MediaRenderer. As respostas trazem um
+// header LOCATION (XML de descrição do device), do qual extraímos o nome e a
+// URL de controle do serviço AVTransport (usada para LOAD/PLAY/SEEK).
+// ---------------------------------------------------------------------------
+
+const SSDP_ADDR = '239.255.255.250'
+const SSDP_PORT = 1900
+const SSDP_ST = 'urn:schemas-upnp-org:device:MediaRenderer:1'
+
+function ssdpQuery(): Uint8Array {
+  const msg =
+    'M-SEARCH * HTTP/1.1\r\n' +
+    `HOST: ${SSDP_ADDR}:${SSDP_PORT}\r\n` +
+    'MAN: "ssdp:discover"\r\n' +
+    'MX: 2\r\n' +
+    `ST: ${SSDP_ST}\r\n` +
+    '\r\n'
+  return new TextEncoder().encode(msg)
+}
+
+/** Extrai o valor de um header HTTP (case-insensitive) da resposta SSDP. */
+function header(text: string, name: string): string {
+  const re = new RegExp(`^${name}:\\s*(.+)$`, 'im')
+  const m = re.exec(text)
+  return m ? m[1].trim() : ''
+}
+
+function decodeEntities(s: string): string {
+  return s
+    .replace(/&quot;/g, '"')
+    .replace(/&apos;/g, "'")
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&#(\d+);/g, (_, n) => String.fromCharCode(Number(n)))
+    .replace(/&amp;/g, '&')
+}
+
+function xmlTag(xml: string, tag: string): string {
+  const m = new RegExp(`<${tag}[^>]*>([^<]*)</${tag}>`, 'i').exec(xml)
+  return m ? decodeEntities(m[1].trim()) : ''
+}
+
+/** Resolve uma URL (possivelmente relativa) contra a base do LOCATION. */
+function resolveUrl(base: string, url: string): string {
+  if (/^https?:\/\//i.test(url)) return url
+  try {
+    const b = new URL(base)
+    const origin = `${b.protocol}//${b.host}`
+    return url.startsWith('/') ? origin + url : `${origin}/${url}`
+  } catch {
+    return url
+  }
+}
+
+/** Acha o controlURL de um serviço (por regex no serviceType) no XML do device. */
+function serviceControlUrl(xml: string, location: string, match: RegExp): string {
+  const re = /<service>([\s\S]*?)<\/service>/gi
+  let m: RegExpExecArray | null
+  while ((m = re.exec(xml))) {
+    const block = m[1]
+    if (match.test(xmlTag(block, 'serviceType'))) {
+      const ctrl = xmlTag(block, 'controlURL')
+      if (ctrl) return resolveUrl(location, ctrl)
+    }
+  }
+  return ''
+}
+
+/** true se o renderer aceita vídeo (Sink do ConnectionManager tem `video/`).
+ * Best-effort: em caso de dúvida (sem ConnectionManager/Sink/erro) devolve true
+ * pra não filtrar demais. */
+async function rendersVideo(cmControlUrl: string): Promise<boolean> {
+  if (!cmControlUrl) return true
+  const service = 'urn:schemas-upnp-org:service:ConnectionManager:1'
+  const body =
+    `<?xml version="1.0" encoding="utf-8"?>` +
+    `<s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/" ` +
+    `s:encodingStyle="http://schemas.xmlsoap.org/soap/encoding/">` +
+    `<s:Body><u:GetProtocolInfo xmlns:u="${service}"></u:GetProtocolInfo></s:Body></s:Envelope>`
+  try {
+    const res = await fetch(cmControlUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/xml; charset="utf-8"', SOAPAction: `"${service}#GetProtocolInfo"` },
+      body,
+      signal: AbortSignal.timeout(4000)
+    })
+    if (!res.ok) return true
+    const sink = xmlTag(await res.text(), 'Sink')
+    if (!sink) return true
+    return /:(video|image)\//i.test(sink)
+  } catch {
+    return true
+  }
+}
+
+/** Busca o XML de descrição e monta o CastDevice DLNA (ou null se não servir). */
+async function fetchDlnaDevice(location: string): Promise<CastDevice | null> {
+  try {
+    const res = await fetch(location, { signal: AbortSignal.timeout(4000) })
+    if (!res.ok) return null
+    const xml = await res.text()
+    const controlUrl = serviceControlUrl(xml, location, /AVTransport/i)
+    if (!controlUrl) return null // sem AVTransport não dá pra controlar reprodução
+    // Descarta renderers só de áudio (o Sink não anuncia nenhum `video/`).
+    const cmControl = serviceControlUrl(xml, location, /ConnectionManager/i)
+    if (!(await rendersVideo(cmControl))) return null
+    const name = xmlTag(xml, 'friendlyName') || 'TV (DLNA)'
+    const model = xmlTag(xml, 'modelName') || xmlTag(xml, 'manufacturer') || ''
+    const udn = xmlTag(xml, 'UDN') || location
+    const host = new URL(location).hostname
+    return { name, host, port: Number(new URL(location).port) || 80, id: udn, model, protocol: 'dlna', controlUrl }
+  } catch {
+    return null
+  }
+}
+
+/** Descobre dispositivos DLNA/UPnP (MediaRenderer) na LAN via SSDP. */
+export async function discoverDlnaDevices(timeoutMs = 2500): Promise<CastDevice[]> {
+  let ips = lanCandidates(await listLocalIPv4())
+  if (ips.length === 0) ips = [await localIp()]
+  const query = ssdpQuery()
+  const locations = new Set<string>()
+
+  const sockets = []
+  for (const ip of ips) {
+    try {
+      const s = await Bun.udpSocket({
+        hostname: ip,
+        port: 0,
+        socket: {
+          data(_s, data) {
+            const text = new TextDecoder().decode(data as Uint8Array)
+            const loc = header(text, 'LOCATION')
+            if (loc) locations.add(loc)
+          }
+        }
+      })
+      s.setMulticastInterface?.(ip)
+      s.setMulticastTTL?.(4)
+      s.send(query, SSDP_PORT, SSDP_ADDR)
+      sockets.push(s)
+    } catch {
+      // interface sem multicast — ignora
+    }
+  }
+  // Reenvia em rajadas ao longo da janela — dispositivos SSDP respondem de forma
+  // intermitente (uma TV pode não responder à 1ª query), então insistimos.
+  const bursts = Math.max(2, Math.floor(timeoutMs / 800))
+  const step = timeoutMs / bursts
+  for (let i = 1; i < bursts; i++) {
+    await Bun.sleep(step)
+    for (const s of sockets) {
+      try {
+        s.send(query, SSDP_PORT, SSDP_ADDR)
+      } catch {
+        // ignora
+      }
+    }
+  }
+  await Bun.sleep(step)
+  for (const s of sockets) s.close()
+
+  const devices = await Promise.all([...locations].map(fetchDlnaDevice))
+  const out = devices.filter((d): d is CastDevice => d != null)
+  const byId = new Map<string, CastDevice>()
+  for (const d of out) byId.set(d.id, d)
+  return [...byId.values()].sort((a, b) => a.name.localeCompare(b.name))
 }

@@ -45,6 +45,40 @@ export function srtToVtt(srt: string): string {
 }
 
 const CORS = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': '*' }
+
+// Flags de features DLNA (contentFeatures.dlna.org). OP=01 → byte-seek. A
+// Samsung recusa stream ao vivo (chunked); serve-se SEMPRE recurso com
+// Content-Length + ranges — inclusive o transcode (arquivo crescente). CI=1
+// só sinaliza "convertido".
+const DLNA_FLAGS = '01700000000000000000000000000000'
+const DLNA_FEAT_FILE = `DLNA.ORG_OP=01;DLNA.ORG_CI=0;DLNA.ORG_FLAGS=${DLNA_FLAGS}`
+
+/** Args de codec pro transcode (VideoToolbox no macOS, libx264 fora). */
+function encoderArgs(): string[] {
+  const mac = process.platform === 'darwin'
+  return [
+    '-map',
+    '0:v:0',
+    '-map',
+    '0:a:0',
+    '-c:v',
+    mac ? 'h264_videotoolbox' : 'libx264',
+    ...(mac ? [] : ['-preset', 'veryfast']),
+    '-b:v',
+    '8M',
+    '-profile:v',
+    'high',
+    '-pix_fmt',
+    'yuv420p',
+    '-c:a',
+    'aac',
+    '-ac',
+    '2',
+    '-b:a',
+    '192k'
+  ]
+}
+
 const SEG = 6 // duração de cada segmento (s)
 const SEG_EST = 6 * 1024 * 1024 // estimativa de tamanho por segmento (~6 MB) p/ dimensionar a janela
 const WAIT_MS = 15000 // espera máx. um segmento aparecer
@@ -311,6 +345,91 @@ class HlsSession {
   }
 }
 
+/**
+ * Pré-transcode DLNA: converte o arquivo INTEIRO pra um .mkv temporário e só
+ * então serve por byte-range. A Samsung recusa transcode ao vivo/crescente
+ * (ela sonda o fim do arquivo pra ler o índice → trava); com o arquivo pronto,
+ * toca e seeka perfeito, igual ao direct-play. Reporta progresso (0..1).
+ */
+export class DlnaPreTranscode {
+  readonly dir: string
+  readonly file: string
+  private proc: Subprocess | null = null
+  readonly done: Promise<boolean>
+
+  constructor(
+    ffmpeg: string,
+    videoPath: string,
+    durationSec: number,
+    onProgress?: (fraction: number) => void
+  ) {
+    this.dir = joinPath(
+      process.env.TMPDIR ?? '/tmp',
+      `legenda-dlna-${Math.floor(Math.random() * 1e9).toString(36)}`
+    )
+    this.file = joinPath(this.dir, 'out.mkv')
+    this.done = this.run(ffmpeg, videoPath, durationSec, onProgress)
+  }
+
+  private async run(
+    ffmpeg: string,
+    videoPath: string,
+    durationSec: number,
+    onProgress?: (fraction: number) => void
+  ): Promise<boolean> {
+    await Bun.$`mkdir -p ${this.dir}`.quiet().nothrow()
+    const mac = process.platform === 'darwin'
+    this.proc = Bun.spawn(
+      [
+        ffmpeg,
+        '-hide_banner',
+        '-loglevel',
+        'error',
+        ...(mac ? ['-hwaccel', 'videotoolbox'] : []),
+        '-i',
+        videoPath,
+        ...encoderArgs(),
+        '-f',
+        'matroska',
+        '-progress',
+        'pipe:1',
+        '-y',
+        this.file
+      ],
+      { stdout: 'pipe', stderr: 'ignore' }
+    )
+    // Lê o progresso do ffmpeg (out_time_us) e reporta a fração concluída.
+    if (onProgress && durationSec > 0 && this.proc.stdout) {
+      void (async () => {
+        const total = durationSec * 1e6
+        for await (const chunk of this.proc!.stdout as ReadableStream<Uint8Array>) {
+          const text = new TextDecoder().decode(chunk)
+          const m = [...text.matchAll(/out_time_us=(\d+)/g)].pop()
+          if (m) onProgress(Math.min(1, Number(m[1]) / total))
+        }
+      })()
+    }
+    const code = await this.proc.exited
+    return code === 0
+  }
+
+  stop(): void {
+    const p = this.proc
+    this.proc = null
+    if (p) {
+      try {
+        p.kill('SIGKILL')
+      } catch {
+        // ignora
+      }
+    }
+    Bun.$`rm -rf ${this.dir}`.quiet().nothrow().then(
+      () => {},
+      () => {}
+    )
+  }
+}
+
 export function startCastServer(opts: {
   ip: string
   videoPath: string
@@ -320,24 +439,45 @@ export function startCastServer(opts: {
   durationSec?: number
   maxRamBytes?: number
   port?: number
+  /** 'chromecast' (HLS + VTT) ou 'dlna' (stream TS/byte-range + SRT). */
+  mode?: 'chromecast' | 'dlna'
 }): CastServer {
   const useTranscode = Boolean(opts.transcode && opts.ffmpegPath)
+  const dlna = opts.mode === 'dlna'
   const rawMime = videoMime(opts.videoPath)
-  const hls = useTranscode
-    ? new HlsSession(
-        opts.ffmpegPath!,
-        opts.videoPath,
-        opts.durationSec ?? 0,
-        opts.maxRamBytes ?? 0.5 * 1024 ** 3
-      )
-    : null
+  // Só o Chromecast usa HLS (RAM/segmentos). No DLNA o vídeo é servido por
+  // byte-range em /video — cru (direct-play) ou já pré-transcodado (a Samsung
+  // recusa transcode ao vivo; ver DlnaPreTranscode + manager).
+  const hls =
+    useTranscode && !dlna
+      ? new HlsSession(
+          opts.ffmpegPath!,
+          opts.videoPath,
+          opts.durationSec ?? 0,
+          opts.maxRamBytes ?? 0.5 * 1024 ** 3
+        )
+      : null
 
   const server = Bun.serve({
     port: opts.port ?? 0,
     hostname: '0.0.0.0',
+    // Respostas de mídia são longas (byte-range grande). Sem isto o Bun aborta
+    // a conexão em 10s → a TV/Chromecast trava em BUFFERING.
+    idleTimeout: 0,
     async fetch(req) {
       const { pathname } = new URL(req.url)
       if (req.method === 'OPTIONS') return new Response(null, { status: 204, headers: CORS })
+
+      if (dlna && pathname === '/subtitle.srt' && opts.subtitlePath) {
+        const srt = await Bun.file(opts.subtitlePath).text()
+        return new Response(srt, {
+          headers: {
+            'Content-Type': 'text/srt; charset=utf-8',
+            'CaptionInfo.sec': req.url,
+            ...CORS
+          }
+        })
+      }
 
       if (hls) {
         if (pathname === '/index.m3u8') {
@@ -358,7 +498,12 @@ export function startCastServer(opts: {
       if (pathname === '/video') {
         const file = Bun.file(opts.videoPath)
         const size = file.size
-        const base = { 'Content-Type': rawMime, 'Accept-Ranges': 'bytes', ...CORS }
+        const base = {
+          'Content-Type': rawMime,
+          'Accept-Ranges': 'bytes',
+          ...CORS,
+          ...(dlna ? { 'contentFeatures.dlna.org': DLNA_FEAT_FILE, 'transferMode.dlna.org': 'Streaming' } : {})
+        }
         const range = req.headers.get('range')
         if (range) {
           const mm = range.match(/bytes=(\d+)-(\d*)/)
@@ -390,10 +535,19 @@ export function startCastServer(opts: {
 
   const port = server.port ?? 0
   const origin = `http://${opts.ip}:${port}`
+  // DLNA sempre usa /video (byte-range); o transcode já vem pré-convertido no
+  // videoPath. Só o Chromecast usa a playlist HLS.
+  const videoUrl = useTranscode && !dlna ? `${origin}/index.m3u8` : `${origin}/video`
+  const subtitleUrl = opts.subtitlePath
+    ? dlna
+      ? `${origin}/subtitle.srt`
+      : `${origin}/subtitle.vtt`
+    : undefined
+  const contentType = useTranscode && !dlna ? 'application/x-mpegURL' : rawMime
   return {
-    videoUrl: useTranscode ? `${origin}/index.m3u8` : `${origin}/video`,
-    subtitleUrl: opts.subtitlePath ? `${origin}/subtitle.vtt` : undefined,
-    contentType: useTranscode ? 'application/x-mpegURL' : rawMime,
+    videoUrl,
+    subtitleUrl,
+    contentType,
     port,
     stop: () => {
       hls?.stop()
