@@ -3,6 +3,8 @@ import type { LegendaRPC } from '../shared/rpc'
 import type {
   AiTranslateArgs,
   AppSettings,
+  CastPlaybackStatus,
+  CastStartArgs,
   DownloadArgs,
   ExtractArgs,
   LogEntry,
@@ -28,6 +30,15 @@ export function onLog(listener: LogListener): () => void {
   return () => logListeners.delete(listener)
 }
 
+// Assinantes do estado de reprodução na TV (Chromecast).
+type CastListener = (s: CastPlaybackStatus) => void
+const castListeners = new Set<CastListener>()
+
+export function onCastStatus(listener: CastListener): () => void {
+  castListeners.add(listener)
+  return () => castListeners.delete(listener)
+}
+
 // Conecta o RPC tipado com o processo Bun e recebe as mensagens de progresso e log.
 // maxRequestTime alto: operações como abrir o diálogo (o usuário demora a
 // escolher) e a tradução por IA levam mais que o timeout padrão (~1s).
@@ -41,6 +52,9 @@ const rpc = Electroview.defineRPC<LegendaRPC>({
       },
       log: (entry) => {
         for (const listener of logListeners) listener(entry)
+      },
+      castStatus: (status) => {
+        for (const listener of castListeners) listener(status)
       }
     }
   }
@@ -69,5 +83,9 @@ export const api = {
   translationStatus: (args: AiTranslateArgs) => call.translationStatus(args),
   cancelTranslate: (path: string) => call.cancelTranslate({ path }),
   checkDependencies: () => call.checkDependencies({}),
-  getLogBuffer: () => call.getLogBuffer({})
+  getLogBuffer: () => call.getLogBuffer({}),
+  castDiscover: () => call.castDiscover({}),
+  castStart: (args: CastStartArgs) => call.castStart(args),
+  castControl: (action: 'play' | 'pause' | 'stop' | 'seek', seconds?: number) =>
+    call.castControl({ action, seconds })
 }

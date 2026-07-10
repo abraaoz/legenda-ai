@@ -1,6 +1,7 @@
 import { ApplicationMenu, BrowserView, BrowserWindow, Updater, Utils } from 'electrobun/bun'
 import type { LegendaRPC } from '../shared/rpc'
-import type { AppSettings, LogEntry } from '../shared/types'
+import type { AppSettings, CastPlaybackStatus, LogEntry } from '../shared/types'
+import { castControl, castDiscover, castStart, setCastStatusSink } from './lib/cast/manager'
 import { checkDependencies } from './lib/dependencies'
 import { findExternalSubtitles, listVideosInFolder } from './lib/files'
 import { extractEmbedded } from './lib/ffmpeg'
@@ -31,6 +32,7 @@ type MessageSender = {
   send: {
     translateProgress: (p: ProgressMsg) => void
     log: (e: LogEntry) => void
+    castStatus: (s: CastPlaybackStatus) => void
   }
 }
 function messenger(): MessageSender['send'] | undefined {
@@ -134,6 +136,15 @@ const rpc = BrowserView.defineRPC<LegendaRPC>({
       }),
       checkDependencies: logged('checkDependencies', () => checkDependencies()),
       getLogBuffer: () => getLogBuffer(),
+      castDiscover: logged('castDiscover', () => castDiscover()),
+      castStart: logged('castStart', async (args) => {
+        await castStart(args)
+        return true
+      }),
+      castControl: logged('castControl', async ({ action, seconds }) => {
+        await castControl(action, seconds)
+        return true
+      }),
       aiTranslateEmbedded: logged(
         'aiTranslateEmbedded',
         async ({ path, index, sourceLanguage, isText }) => {
@@ -220,6 +231,9 @@ ApplicationMenu.setApplicationMenu([
 
 // A partir daqui, todo log() do backend também vai para a coluna de Log na UI.
 setLogSink((entry) => messenger()?.log(entry))
+
+// Estado de reprodução na TV (Chromecast) → empurra pra UI.
+setCastStatusSink((s) => messenger()?.castStatus(s))
 
 // Auto-update (Electrobun): o menu "Buscar atualizações…" checa o release mais
 // novo no GitHub (release.baseUrl), baixa e aplica reiniciando. Cada mudança de

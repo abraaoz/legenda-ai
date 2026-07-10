@@ -49,6 +49,11 @@ src/
 │       ├── logger.ts          # log verboso do backend (buffer + envio à UI)
 │       ├── dependencies.ts    # checkDependencies() (ffmpeg/ffprobe/Ollama/escrita)
 │       ├── settings.ts        # persistência (Bun.file/Bun.write) por SO
+│       ├── cast/              # "Tocar na TV" (Chromecast/Google Cast)
+│       │   ├── discover.ts        # mDNS (Bun.udpSocket) + localIp
+│       │   ├── client.ts          # protocolo CASTV2 (protobuf+TLS)
+│       │   ├── server.ts          # HTTP de mídia (range) + SRT→VTT
+│       │   └── manager.ts         # orquestra sessão única + status
 │       └── paths.ts           # basename/dirname/extname/joinPath (sem node:path)
 ├── mainview/               # UI (React, roda no webview)
 │   ├── index.html             # carrega views://mainview/index.{js,css}
@@ -124,6 +129,13 @@ Detectadas em `dependencies.ts` e exibidas num **checklist visual** nas Configur
   - **Fallback: Tesseract** (Linux, ou sem engine nativo): upscale 2x + `--psm 6` + `cleanOcrText` (corrige "I" lido como "|").
   `hasOcr()` = Vision **ou** Windows.Media.Ocr **ou** Tesseract; `VideoInfo.ocrAvailable` reflete isso. Validado contra um Blu-ray real (Twin Peaks): 1105 falas. `translate.ts#produceSourceSrt` decide texto (ffmpeg) vs imagem (OCR). A tradução de imagem tem 2 fases (`translateProgress.phase = 'ocr' | 'translate'`). Tesseract entra no checklist e em `VideoInfo.tesseractAvailable`. Idioma extra: `brew install tesseract-lang`.
 - **OCR retomável/idempotente**: `ocrPgsToSrt` grava o `.srt` a cada 10 imagens e mantém um marcador **`<srt>.part`** enquanto incompleto. Retoma pela primeira imagem com `startMs` maior que o último cue gravado; se já passou de todas, retorna rápido e apaga o marcador. Cancelar (via `signal`) mantém o parcial + marcador e **lança** (não deixa traduzir fonte incompleta). O `.sup` é **cacheado** em `$TMPDIR/legenda-ocr-<size>-<index>.sup` porque extrair do MKV varre o container inteiro (lento, ~90s). `produceSourceSrt` só reusa o `.srt` de origem se **não** houver marcador `.part`.
+- **Tocar na TV (Chromecast / Google Cast)** — `src/bun/lib/cast/`, tudo em Bun nativo (sem lib Node). Fluxo: descobrir → conectar → servir mídia → LOAD com legenda VTT → controles. **Validado ponta-a-ponta num Chromecast real.** Botão "📺 Tocar na TV" no card (escolhe dispositivo + uma legenda `.srt` externa); barra de status/controle no topo (⏸/▶/⏹ + progresso). RPC: `castDiscover`/`castStart`/`castControl` + mensagem `castStatus`. **Só UMA sessão ativa** (o `manager` encerra a anterior). **Aprendizados que custaram caro (não regredir):**
+  - **`socket.write` do Bun NÃO bufferiza** — pode escrever parcial (backpressure, retorna `< length`) e o resto é **descartado** (diferente do Node). O `client.ts` tem uma **fila de saída (outbox)** que escoa no evento `drain`; sem isso, o CONNECT/LAUNCH somem e o handshake falha silenciosamente (sintoma: só heartbeat PONG responde). Foi ISSO que travou a implementação por horas.
+  - **CONNECT precisa de `senderInfo`** completo (nos moldes do pychromecast) — firmware novo manda `{"type":"CLOSE"}` no canal se o CONNECT for cru `{type:CONNECT}`. Ver `CONNECT_PAYLOAD`.
+  - **source id único por conexão** (`sender-<rand>`) — reusar `sender-0` faz o receiver fechar como duplicata.
+  - **IP da LAN**: detecte conectando um UDP socket **ao próprio dispositivo** (`localIp(deviceHost)`), NÃO a `8.8.8.8` — com VPN/Tailscale ativa a rota default é CGNAT `100.64.x`, que a TV não alcança (o servidor de mídia ficaria inacessível).
+  - **Descoberta com VPN**: enumera as interfaces via **`/sbin/ifconfig` (caminho ABSOLUTO** — .app do Finder tem PATH mínimo) e roda a query mDNS em cada IP de **LAN privada** (192.168/10/172.16-31), ignorando loopback e CGNAT. macOS ocupa a 5353, então a query pede resposta **unicast** (bit QU no QCLASS).
+  - **Legenda**: o Cast só aceita **WebVTT** (o `server.ts` converte SRT→VTT: `WEBVTT\n\n` + vírgula→ponto nos tempos) e exige **CORS** (`Access-Control-Allow-Origin: *`) na resposta da legenda. O vídeo é servido com **byte-range** (206) pra permitir seek. Sem transcode: se o codec não for suportado pela TV (ex.: HEVC/AC3 em MKV), não toca.
 
 ## Como validar mudanças
 

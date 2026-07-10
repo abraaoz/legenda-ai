@@ -635,3 +635,82 @@ a:hover {
   word-break: break-all;
   flex-shrink: 0;
 }
+
+/* Cast (Tocar na TV) */
+.cast-bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 14px;
+  margin-bottom: 16px;
+  background: var(--panel);
+  border: 1px solid var(--accent-2);
+  border-radius: 10px;
+}
+
+.cast-dev {
+  font-weight: 600;
+  font-size: 14px;
+}
+
+.cast-time {
+  font-variant-numeric: tabular-nums;
+  flex-shrink: 0;
+}
+
+.cast-track {
+  flex: 1;
+  height: 6px;
+  background: var(--panel-2);
+  border-radius: 999px;
+  overflow: hidden;
+}
+
+.cast-fill {
+  height: 100%;
+  background: var(--accent-2);
+  border-radius: 999px;
+  transition: width 0.4s linear;
+}
+
+.cast-state {
+  flex-shrink: 0;
+  text-transform: capitalize;
+}
+
+.cast-picker {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 14px;
+  padding: 12px 14px;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+
+.cast-picker-row {
+  display: flex;
+  align-items: flex-end;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.cast-picker label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.cast-picker select {
+  font: inherit;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  color: var(--text);
+  border-radius: 8px;
+  height: 36px;
+  padding: 0 10px;
+  min-width: 200px;
+}

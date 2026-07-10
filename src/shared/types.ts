@@ -179,3 +179,32 @@ export interface ValidateResult {
   valid: boolean
   message: string
 }
+
+/** Dispositivo Google Cast descoberto na LAN. */
+export interface CastDevice {
+  name: string
+  host: string
+  port: number
+  id: string
+  model: string
+}
+
+/** Estado de reprodução na TV (empurrado para a UI). */
+export interface CastPlaybackStatus {
+  device: string
+  /** PLAYING | PAUSED | BUFFERING | IDLE | STOPPED */
+  playerState: string
+  currentTime: number
+  duration: number
+}
+
+/** Parâmetros para iniciar o "Tocar na TV". */
+export interface CastStartArgs {
+  deviceHost: string
+  deviceName: string
+  videoPath: string
+  subtitlePath?: string
+  subtitleLang?: string
+  subtitleLabel?: string
+  title: string
+}

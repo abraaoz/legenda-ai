@@ -1,10 +1,13 @@
 import { useEffect, useRef, useState } from "react";
 import { AppLogo } from "./AppLogo";
-import { api, onLog, onTranslateProgress } from "./api";
+import { api, onCastStatus, onLog, onTranslateProgress } from "./api";
 import type {
   AppSettings,
+  CastDevice,
+  CastPlaybackStatus,
   DependencyStatus,
   EmbeddedSubtitle,
+  ExternalSubtitle,
   LogEntry,
   OllamaStatus,
   SubtitleResult,
@@ -121,6 +124,14 @@ function fileUrl(path: string): string {
   return `file://${path.split("/").map(encodeURIComponent).join("/")}`;
 }
 
+/** Segundos → mm:ss. */
+function fmtTime(sec: number): string {
+  if (!sec || sec < 0) return "0:00";
+  const m = Math.floor(sec / 60);
+  const s = Math.floor(sec % 60);
+  return `${m}:${String(s).padStart(2, "0")}`;
+}
+
 export default function App() {
   const [settings, setSettings] = useState<AppSettings>({
     apiKey: "",
@@ -139,6 +150,14 @@ export default function App() {
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const logBodyRef = useRef<HTMLDivElement>(null);
 
+  // Cast (Tocar na TV)
+  const [castStatus, setCastStatus] = useState<CastPlaybackStatus | null>(null);
+  const [castPickerFor, setCastPickerFor] = useState<string | null>(null);
+  const [castDevices, setCastDevices] = useState<CastDevice[]>([]);
+  const [castDiscovering, setCastDiscovering] = useState(false);
+  const [pickDevice, setPickDevice] = useState("");
+  const [pickSub, setPickSub] = useState("");
+
   const targetLabel =
     LANGUAGES.find((l) => l.code === settings.language)?.label ??
     settings.language;
@@ -155,6 +174,15 @@ export default function App() {
       if (!s.apiKey) setShowSettings(true);
     });
   }, []);
+
+  // Estado de reprodução na TV (Chromecast) em tempo real.
+  useEffect(
+    () =>
+      onCastStatus((s) =>
+        setCastStatus(s.playerState === "STOPPED" ? null : s),
+      ),
+    [],
+  );
 
   // Log do backend: pega o histórico e assina as novas linhas em tempo real.
   useEffect(() => {
@@ -455,6 +483,45 @@ export default function App() {
     setVideos((prev) => prev.filter((v) => v.id !== video.id));
   }
 
+  // --- Tocar na TV (Chromecast) ---
+  async function openCastPicker(video: VideoState): Promise<void> {
+    if (!video.info) return;
+    setCastPickerFor(video.id);
+    setCastDevices([]);
+    setPickDevice("");
+    setPickSub(video.info.external[0]?.path ?? "");
+    setCastDiscovering(true);
+    try {
+      const devs = await api.castDiscover();
+      setCastDevices(devs);
+      setPickDevice(devs[0]?.host ?? "");
+    } finally {
+      setCastDiscovering(false);
+    }
+  }
+
+  async function startCast(video: VideoState): Promise<void> {
+    if (!video.info || !pickDevice) return;
+    const dev = castDevices.find((d) => d.host === pickDevice);
+    const sub = video.info.external.find((s) => s.path === pickSub);
+    setCastPickerFor(null);
+    try {
+      await api.castStart({
+        deviceHost: pickDevice,
+        deviceName: dev?.name ?? "TV",
+        videoPath: video.info.path,
+        subtitlePath: sub?.path,
+        subtitleLang: sub?.language || undefined,
+        subtitleLabel: sub ? sub.language.toUpperCase() || "Legenda" : undefined,
+        title: video.name,
+      });
+    } catch (err) {
+      patch(video.id, {
+        message: `Falha ao tocar na TV: ${(err as Error).message}`,
+      });
+    }
+  }
+
   async function saveSettings(next: AppSettings): Promise<void> {
     const saved = await api.saveSettings(next);
     setSettings(saved);
@@ -485,6 +552,49 @@ export default function App() {
         </header>
 
         <main className="content">
+          {castStatus && (
+            <div className="cast-bar">
+              <span className="cast-dev">📺 {castStatus.device}</span>
+              <button
+                className="ghost sm"
+                title={castStatus.playerState === "PLAYING" ? "Pausar" : "Tocar"}
+                onClick={() =>
+                  api.castControl(
+                    castStatus.playerState === "PLAYING" ? "pause" : "play",
+                  )
+                }
+              >
+                {castStatus.playerState === "PLAYING" ? "⏸" : "▶"}
+              </button>
+              <button
+                className="ghost sm"
+                title="Parar"
+                onClick={() => api.castControl("stop")}
+              >
+                ⏹
+              </button>
+              <span className="muted cast-time">
+                {fmtTime(castStatus.currentTime)}
+                {castStatus.duration > 0 && ` / ${fmtTime(castStatus.duration)}`}
+              </span>
+              <div className="cast-track">
+                <div
+                  className="cast-fill"
+                  style={{
+                    width: castStatus.duration
+                      ? `${Math.min(100, (castStatus.currentTime / castStatus.duration) * 100)}%`
+                      : "0%",
+                  }}
+                />
+              </div>
+              <span className="muted cast-state">
+                {castStatus.playerState === "BUFFERING"
+                  ? "carregando…"
+                  : castStatus.playerState.toLowerCase()}
+              </span>
+            </div>
+          )}
+
           <section className="dropzone">
             <p className="dz-title">Adicione seus vídeos</p>
             <div className="dz-actions">
@@ -572,6 +682,14 @@ export default function App() {
                   </div>
                   <div className="card-head-actions">
                     <button
+                      className="ghost sm"
+                      disabled={!video.info || castPickerFor === video.id}
+                      title="Tocar este vídeo numa TV (Chromecast) com a legenda"
+                      onClick={() => openCastPicker(video)}
+                    >
+                      📺 Tocar na TV
+                    </button>
+                    <button
                       className="primary sm"
                       disabled={video.status !== "ready" || video.searching}
                       onClick={() => search(video)}
@@ -589,6 +707,63 @@ export default function App() {
                     </button>
                   </div>
                 </div>
+
+                {castPickerFor === video.id && video.info && (
+                  <div className="cast-picker">
+                    <span className="section-label">📺 Tocar na TV</span>
+                    {castDiscovering ? (
+                      <span className="muted">Procurando dispositivos…</span>
+                    ) : castDevices.length === 0 ? (
+                      <span className="muted">
+                        Nenhum Chromecast encontrado na rede.
+                      </span>
+                    ) : (
+                      <div className="cast-picker-row">
+                        <label>
+                          Dispositivo
+                          <select
+                            value={pickDevice}
+                            onChange={(e) => setPickDevice(e.target.value)}
+                          >
+                            {castDevices.map((d) => (
+                              <option key={d.id} value={d.host}>
+                                {d.name}
+                                {d.model ? ` (${d.model})` : ""}
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+                        <label>
+                          Legenda
+                          <select
+                            value={pickSub}
+                            onChange={(e) => setPickSub(e.target.value)}
+                          >
+                            <option value="">Sem legenda</option>
+                            {video.info.external.map((s: ExternalSubtitle) => (
+                              <option key={s.path} value={s.path}>
+                                {s.name}
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+                        <button
+                          className="primary sm"
+                          disabled={!pickDevice}
+                          onClick={() => startCast(video)}
+                        >
+                          ▶ Tocar
+                        </button>
+                      </div>
+                    )}
+                    <button
+                      className="ghost sm"
+                      onClick={() => setCastPickerFor(null)}
+                    >
+                      Fechar
+                    </button>
+                  </div>
+                )}
 
                 {video.info && video.info.embedded.length > 0 && (
                   <div className="embedded">

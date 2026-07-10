@@ -2,6 +2,9 @@ import type { RPCSchema } from 'electrobun/view'
 import type {
   AiTranslateArgs,
   AppSettings,
+  CastDevice,
+  CastPlaybackStatus,
+  CastStartArgs,
   DependencyStatus,
   DownloadArgs,
   DownloadResult,
@@ -45,6 +48,9 @@ export type LegendaRPC = {
       cancelTranslate: { params: { path: string }; response: boolean }
       checkDependencies: { params: Record<string, never>; response: DependencyStatus[] }
       getLogBuffer: { params: Record<string, never>; response: LogEntry[] }
+      castDiscover: { params: Record<string, never>; response: CastDevice[] }
+      castStart: { params: CastStartArgs; response: boolean }
+      castControl: { params: { action: 'play' | 'pause' | 'stop' | 'seek'; seconds?: number }; response: boolean }
     }
   }>
   webview: RPCSchema<{
@@ -54,6 +60,8 @@ export type LegendaRPC = {
       translateProgress: TranslateProgress
       // Cada linha de log do backend, em tempo real.
       log: LogEntry
+      // Estado de reprodução na TV (Chromecast).
+      castStatus: CastPlaybackStatus
     }
   }>
 }
