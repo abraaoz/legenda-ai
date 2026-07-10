@@ -554,7 +554,13 @@ export default function App() {
     setCastPickerFor(video.id);
     setCastDevices([]);
     setPickDevice("");
-    setPickSub(video.info.external[0]?.path ?? "");
+    // Default: a legenda no idioma alvo (ex.: a traduzida "Filme.pt-br.srt");
+    // se não houver, a primeira disponível.
+    const target = settings.language.toLowerCase();
+    const preferred =
+      video.info.external.find((s) => s.language.toLowerCase() === target) ??
+      video.info.external[0];
+    setPickSub(preferred?.path ?? "");
     setCastDiscovering(true);
     try {
       const devs = await api.castDiscover();
