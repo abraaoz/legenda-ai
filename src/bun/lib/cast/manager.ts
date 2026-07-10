@@ -6,7 +6,7 @@ import { resolveBinary } from '../ffmpeg'
 import { logi, loge } from '../logger'
 import { discoverCastDevices, localIp } from './discover'
 import { CastConnection } from './client'
-import { startCastServer, videoMime, type CastServer } from './server'
+import { startCastServer, type CastServer } from './server'
 
 interface Probe {
   video: string
@@ -88,7 +88,8 @@ export async function castStart(args: CastStartArgs): Promise<void> {
     videoPath: args.videoPath,
     subtitlePath: args.subtitlePath,
     transcode,
-    ffmpegPath
+    ffmpegPath,
+    durationSec: probe.durationSec
   })
 
   conn = new CastConnection()
@@ -112,7 +113,7 @@ export async function castStart(args: CastStartArgs): Promise<void> {
   await conn.launch()
   await conn.load({
     contentUrl: server.videoUrl,
-    contentType: transcode ? 'video/mp4' : videoMime(args.videoPath),
+    contentType: server.contentType,
     title: args.title,
     durationSec: probe.durationSec,
     subtitleUrl: server.subtitleUrl,
