@@ -377,7 +377,8 @@ button.sm {
   padding: 24px;
   width: 620px;
   max-width: calc(100vw - 40px);
-  height: 95vh; /* altura fixa: sempre 95% da janela */
+  height: 95vh; /* 95% da janela… */
+  max-height: 800px; /* …mas nunca passa de 800px */
   display: flex;
   flex-direction: column;
 }
@@ -664,6 +665,11 @@ a:hover {
   background: var(--panel-2);
   border-radius: 999px;
   overflow: hidden;
+}
+
+.cast-seekable {
+  cursor: pointer;
+  height: 8px;
 }
 
 .cast-fill {

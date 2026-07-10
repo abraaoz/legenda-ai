@@ -161,6 +161,7 @@ export default function App() {
     azureKey: "",
     azureRegion: "",
     azureEndpoint: "https://api.cognitive.microsofttranslator.com",
+    castRamGb: 0.5,
   });
   const [showSettings, setShowSettings] = useState(false);
   const [videos, setVideos] = useState<VideoState[]>([]);
@@ -578,6 +579,7 @@ export default function App() {
         subtitleLang: sub?.language || undefined,
         subtitleLabel: sub ? sub.language.toUpperCase() || "Legenda" : undefined,
         title: video.name,
+        ramGb: settings.castRamGb,
       });
     } catch (err) {
       patch(video.id, {
@@ -641,7 +643,19 @@ export default function App() {
                 {fmtTime(castStatus.currentTime)}
                 {castStatus.duration > 0 && ` / ${fmtTime(castStatus.duration)}`}
               </span>
-              <div className="cast-track">
+              <div
+                className="cast-track cast-seekable"
+                title="Clique para pular"
+                onClick={(e) => {
+                  if (!castStatus.duration) return;
+                  const r = e.currentTarget.getBoundingClientRect();
+                  const frac = Math.min(
+                    1,
+                    Math.max(0, (e.clientX - r.left) / r.width),
+                  );
+                  void api.castControl("seek", frac * castStatus.duration);
+                }}
+              >
                 <div
                   className="cast-fill"
                   style={{
@@ -1147,9 +1161,9 @@ function SettingsModal({
   onSave: (s: AppSettings) => void;
   onImported: (s: AppSettings) => void;
 }) {
-  const [tab, setTab] = useState<"checklist" | "download" | "translate">(
-    "checklist",
-  );
+  const [tab, setTab] = useState<
+    "checklist" | "download" | "translate" | "playback"
+  >("checklist");
   const [ioMsg, setIoMsg] = useState("");
   const [apiKey, setApiKey] = useState(settings.apiKey);
   const [language, setLanguage] = useState(settings.language);
@@ -1159,6 +1173,7 @@ function SettingsModal({
   const [azureKey, setAzureKey] = useState(settings.azureKey);
   const [azureRegion, setAzureRegion] = useState(settings.azureRegion);
   const [azureEndpoint, setAzureEndpoint] = useState(settings.azureEndpoint);
+  const [castRamGb, setCastRamGb] = useState(settings.castRamGb);
   const [validating, setValidating] = useState(false);
   const [validation, setValidation] = useState<{
     valid: boolean;
@@ -1228,6 +1243,7 @@ function SettingsModal({
     setAzureKey(s.azureKey);
     setAzureRegion(s.azureRegion);
     setAzureEndpoint(s.azureEndpoint);
+    setCastRamGb(s.castRamGb);
   }
 
   async function doExport(): Promise<void> {
@@ -1296,6 +1312,12 @@ function SettingsModal({
               onClick={() => setTab("translate")}
             >
               Legendas por Tradução
+            </button>
+            <button
+              className={`tab ${tab === "playback" ? "active" : ""}`}
+              onClick={() => setTab("playback")}
+            >
+              Reprodução
             </button>
           </div>
         </div>
@@ -1580,6 +1602,31 @@ function SettingsModal({
               )}
             </div>
           )}
+
+          {tab === "playback" && (
+            <div>
+              <span className="section-label">📺 Tocar na TV (Chromecast)</span>
+              <label>
+                RAM para o streaming
+                <select
+                  value={String(castRamGb)}
+                  onChange={(e) => setCastRamGb(Number(e.target.value))}
+                >
+                  <option value="0.25">0,25 GB (econômico)</option>
+                  <option value="0.5">0,5 GB (padrão)</option>
+                  <option value="1">1 GB</option>
+                  <option value="2">2 GB (seek amplo)</option>
+                  <option value="4">4 GB</option>
+                </select>
+              </label>
+              <p className="hint">
+                Buffer em memória dos segmentos quando o vídeo precisa ser
+                transcodado pra tocar na TV (ex.: HEVC/x265). Quanto maior, maior
+                o alcance de <strong>seek instantâneo</strong> — ao custo de mais
+                RAM. Fora dessa janela, o seek reinicia o transcode (~1-2s).
+              </p>
+            </div>
+          )}
         </div>
 
         {ioMsg && <p className="io-msg muted">{ioMsg}</p>}
@@ -1607,6 +1654,7 @@ function SettingsModal({
                 azureKey: azureKey.trim(),
                 azureRegion: azureRegion.trim(),
                 azureEndpoint: azureEndpoint.trim(),
+                castRamGb,
               })
             }
           >

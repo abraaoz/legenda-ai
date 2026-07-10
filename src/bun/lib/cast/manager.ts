@@ -89,7 +89,8 @@ export async function castStart(args: CastStartArgs): Promise<void> {
     subtitlePath: args.subtitlePath,
     transcode,
     ffmpegPath,
-    durationSec: probe.durationSec
+    durationSec: probe.durationSec,
+    maxRamBytes: Math.max(0.1, args.ramGb || 0.5) * 1024 ** 3
   })
 
   conn = new CastConnection()

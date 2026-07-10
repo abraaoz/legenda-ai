@@ -36,9 +36,11 @@ export default {
     // não têm versão (ex.: stable-macos-arm64-update.json), o app checa sempre
     // o update.json mais recente. (Só o canal "stable"/"canary" atualiza; "dev" não.)
     baseUrl: 'https://github.com/abraaoz/legenda-ai/releases/latest/download',
-    // Sem patch delta por ora: o update baixa o pacote inteiro. Evita o
-    // ovo-e-galinha do bsdiff precisar do tarball da versão anterior no build.
-    generatePatch: false
+    // Patch delta (bsdiff): no build, o Electrobun baixa o tarball da versão
+    // ANTERIOR do baseUrl (latest/download → o release atual) e gera um patch
+    // pra ela. Quem está 1 versão atrás baixa só o patch (pequeno); mais de 1
+    // versão atrás cai no download completo (fallback automático).
+    generatePatch: true
   },
   scripts: {
     // Compila e embute o helper de OCR do macOS (Vision) no app bundle.

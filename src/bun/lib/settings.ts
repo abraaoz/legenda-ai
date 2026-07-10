@@ -9,7 +9,8 @@ const DEFAULTS: AppSettings = {
   ollamaModel: '',
   azureKey: '',
   azureRegion: '',
-  azureEndpoint: 'https://api.cognitive.microsofttranslator.com'
+  azureEndpoint: 'https://api.cognitive.microsofttranslator.com',
+  castRamGb: 0.5
 }
 
 /** Diretório de configuração por SO (sem usar módulos externos). */

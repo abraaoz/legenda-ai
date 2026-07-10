@@ -1,126 +1,72 @@
-# Legenda AI pra mim 🎬
+<img src="assets/icon-1024.png" width="110" align="right" alt="">
 
-App desktop (macOS, Windows e Linux) feito com **Bun + [Electrobun](https://electrobun.dev)**
-— sem Node, sem Electron/Chromium — que baixa legendas sincronizadas para seus
-arquivos de vídeo. Usa o *hash* do OpenSubtitles para achar a legenda com
-sincronia exata (e cai para busca por nome quando não há match).
+# Legenda AI pra mim
 
-## Stack
+App de computador (Mac, Windows e Linux) para **baixar, traduzir e assistir**
+legendas dos seus vídeos — direto na sua TV, se quiser. Simples, offline quando
+dá, e sem enviar seus arquivos pra lugar nenhum.
 
-- **Runtime: Bun** — toda a lógica roda no processo Bun (`Bun.file`, `fetch`, `Bun.write`)
-- **Framework: Electrobun** — webview nativo do SO, RPC tipado main↔UI, bundler,
-  assinatura/notarização e **auto-update** (patches bsdiff) embutidos
-- **UI: React 19 + TypeScript**, bundlada pelo Electrobun (Bun.build)
-- **Diálogo de arquivo nativo:** `Utils.openFileDialog` do Electrobun
-- **Distribuição:** `.dmg` (macOS), instalador (Windows), pacote (Linux) + tarball de update
+## O que ele faz
 
-## Arquitetura
+- 🔎 **Baixa a legenda certa** — acha no OpenSubtitles pelo "impressão digital" do
+  vídeo, então vem **100% sincronizada** (nada de legenda adiantada/atrasada).
+- 🌎 **Traduz legendas** para o seu idioma, **mantendo a sincronia**. Funciona com
+  legenda embutida no vídeo (MKV) ou com um arquivo `.srt` que você já tem. Três
+  opções de tradução:
+  - **Apple** — no próprio Mac, offline e grátis (macOS 15+);
+  - **Ollama** — offline no seu computador (grátis, precisa instalar);
+  - **Azure** — na nuvem (precisa de uma conta Microsoft).
+- 👁️ **Lê legendas "em imagem"** de Blu-ray (aquelas que não são texto) e vira
+  texto pra poder traduzir.
+- 📺 **Toca na TV (Chromecast)** — manda o vídeo **com a legenda** pra sua TV, e
+  ainda **converte na hora** formatos que a TV não aceita (ex.: filmes em x265),
+  com a barra de tempo funcionando (pular pra frente/trás).
 
-```
-┌── processo Bun (main) ──────────┐        ┌── webview (React) ──┐
-│ handlers de RPC:                │  RPC   │ api.ts chama        │
-│  analyzeVideo → hash            │◄──────►│  api.analyzeVideo() │
-│  searchSubtitles → OpenSubtitles│ tipado │  api.searchSubs()   │
-│  downloadSubtitle → salva .srt  │        │  ...                │
-│  selectVideos → diálogo nativo  │        └─────────────────────┘
-└─────────────────────────────────┘
-```
+## Baixar e instalar
 
-O Electrobun cuida da janela nativa e do transporte RPC; nossa UI só chama
-`api.*`, que são funções tipadas rodando no Bun com acesso a disco e rede.
+Pegue a versão mais recente na página de **[Releases](https://github.com/abraaoz/legenda-ai/releases/latest)**:
 
-## Dois modos de legenda
+- **Mac (Apple Silicon)** → baixe o `.dmg`, abra e arraste pra Aplicativos.
+- **Windows** → baixe o `.zip`, extraia e rode.
+- **Linux** → baixe o `.tar.gz`.
 
-- **OpenSubtitles** (padrão): busca por *hash* do vídeo (sincronia exata) e baixa o `.srt`.
-- **Modo AI** (tradução local): para vídeos com legenda **já embutida** (ex.: MKV),
-  o app detecta as faixas, extrai a legenda (100% sincronizada) e a traduz para o
-  idioma escolhido usando um LLM **local via [Ollama](https://ollama.com)** —
-  preservando os timestamps. Sem custo, sem enviar nada para a nuvem.
+> ⚠️ O app ainda **não é assinado**, então na primeira vez o sistema pode avisar
+> que é de "desenvolvedor não identificado". No Mac: clique com o botão direito →
+> **Abrir**. No Windows: **Mais informações → Executar assim mesmo**.
 
-## Pré-requisitos
+Depois de instalado, o app se **atualiza sozinho** (menu **Legenda AI pra mim →
+Buscar atualizações…**).
 
-1. [Bun](https://bun.sh) instalado.
-2. Uma **chave de API gratuita** do OpenSubtitles (para o modo OpenSubtitles):
-   - Conta em https://www.opensubtitles.com → **Consumers** → gere uma API Key
-   - Cole em **⚙️ Configurações**; há um botão **Validar** e um link para a página.
-3. **ffmpeg** instalado (para detectar/extrair legendas embutidas): `brew install ffmpeg`.
-4. **Ollama** + um modelo (para o Modo AI): instale de https://ollama.com e rode
-   `ollama pull llama3.1` (ou `gemma2:2b` para algo mais leve). Selecione o modelo
-   nas Configurações.
-5. **Linux** (apenas): `webkit2gtk` instalado (macOS e Windows já têm webview nativo).
+## O que você precisa ter
 
-## Desenvolvimento
-
-```bash
-bun install
-bun run dev          # build de dev + abre o app
-bun run dev:watch    # idem, com hot-reload
-bun run typecheck
-```
-
-## Gerar distribuição
-
-```bash
-bun run build:stable   # gera artifacts/ com .dmg / instalador / pacote + update
-```
-
-Rode em cada SO para gerar o binário daquele sistema. Saída em `artifacts/`
-(no macOS: `.dmg`, `.app.tar.zst` e `update.json`).
-
-> **Auto-update & assinatura:** o Electrobun tem update por patch (bsdiff) e
-> guias de code signing/notarização. Para ativar updates, configure
-> `release.baseUrl` no `electrobun.config.ts`. Para assinar, preencha
-> `build.mac.codesign/notarize` (e o certificado no Windows).
-
-## Releases automáticos (CI)
-
-[`.github/workflows/build.yml`](.github/workflows/build.yml) compila em cada SO
-nativo (macOS arm64/Intel, Windows, Linux) via Bun + Electrobun. Ao dar push de
-uma tag `v*`, publica um GitHub Release com todos os artefatos:
-
-```bash
-git tag v1.0.0 && git push origin v1.0.0
-```
+- **ffmpeg** (para ler legendas embutidas e converter vídeo pra TV):
+  no Mac, `brew install ffmpeg`. O app avisa se estiver faltando.
+- **Chave do OpenSubtitles** (só para baixar legendas): crie grátis em
+  [opensubtitles.com](https://www.opensubtitles.com) → *Consumers* → gere uma
+  *API Key* e cole em **⚙️ Configurações**.
+- Para **traduzir**: no Mac não precisa de nada (usa o tradutor da Apple). Fora do
+  Mac, instale o [Ollama](https://ollama.com) ou use uma chave do Azure.
 
 ## Como usar
 
-1. Abra o app e configure a API Key, o idioma e (opcional) o modelo do Ollama.
-2. Clique em **Selecionar vídeos** (diálogo nativo do Electrobun). Ao selecionar,
-   as **legendas já embutidas** no arquivo são detectadas e listadas.
-3. Modo OpenSubtitles: **Buscar no OpenSubtitles** → resultados com selo `sync`
-   casaram pelo hash → **Baixar** (salva como `nome.<idioma>.srt`).
-4. Modo AI (numa faixa embutida):
-   - **Extrair .srt** → salva a legenda embutida sincronizada.
-   - **Traduzir → \<idioma\> (IA)** → extrai e traduz via Ollama, com barra de
-     progresso, salvando `nome.<idioma>.srt` com os mesmos timestamps.
+1. **Adicione vídeos** — botão *Selecionar vídeos* (ou uma pasta inteira).
+2. **Baixar legenda** — *Buscar no OpenSubtitles* → *Baixar* na que tiver o selo
+   de sincronizada.
+3. **Traduzir** — clique em *Traduzir* numa faixa embutida ou numa legenda `.srt`
+   que não esteja no seu idioma. A legenda traduzida é salva **ao lado do vídeo**
+   (ex.: `Filme.pt-br.srt`), pronta pra qualquer player.
+4. **Assistir na TV** — *📺 Tocar na TV*, escolha o Chromecast e a legenda, e dê
+   play. Use a barrinha de tempo para pular.
 
-## Estrutura
+Tudo o que o app faz aparece em tempo real na **coluna de log** à direita.
 
-```
-src/
-├── bun/                    # processo principal (Bun)
-│   ├── index.ts               # handlers de RPC + BrowserWindow
-│   └── lib/
-│       ├── opensubtitles.ts   # hash (Bun.file.slice), busca, download, validate
-│       ├── ffmpeg.ts          # detecta/extrai legendas embutidas (ffprobe/ffmpeg)
-│       ├── ollama.ts          # cliente do Ollama (Modo AI)
-│       ├── translate.ts       # extrai + traduz preservando timestamps
-│       ├── srt.ts             # parse/serialize de SRT
-│       ├── settings.ts        # persistência (Bun.file / Bun.write)
-│       └── paths.ts           # helpers de caminho
-├── mainview/               # UI (React, bundlada pelo Electrobun)
-│   ├── index.html  index.css  index.tsx
-│   ├── App.tsx                # componentes
-│   └── api.ts                 # cliente RPC (Electroview)
-└── shared/
-    ├── types.ts               # tipos de domínio
-    └── rpc.ts                 # contrato de RPC tipado (LegendaRPC)
-electrobun.config.ts        # config de app + build
-```
+## Privacidade
 
-## Configurações
+Seus vídeos **nunca saem do seu computador**. A tradução pela Apple/Ollama é 100%
+local. Só o texto da legenda é enviado se você escolher o Azure (nuvem).
 
-JSON por SO:
-- macOS: `~/Library/Application Support/LegendaAIpraMim/settings.json`
-- Windows: `%APPDATA%\LegendaAIpraMim\settings.json`
-- Linux: `~/.config/legenda-ai-pra-mim/settings.json`
+---
+
+Feito com [Bun](https://bun.sh) + [Electrobun](https://electrobun.dev) (sem
+Node/Electron). Quer contribuir ou entender por dentro? Veja o [DEV.md](DEV.md).
+Licença MIT.

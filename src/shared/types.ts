@@ -86,6 +86,9 @@ export interface AppSettings {
   azureRegion: string
   /** Endpoint do Azure Translator. */
   azureEndpoint: string
+  /** Máx. de RAM (GB) para os segmentos do stream "Tocar na TV" (transcode HLS).
+   * Define o alcance de seek instantâneo em memória. Default 0.5. */
+  castRamGb: number
 }
 
 export interface OllamaStatus {
@@ -207,4 +210,6 @@ export interface CastStartArgs {
   subtitleLang?: string
   subtitleLabel?: string
   title: string
+  /** Máx. de RAM (GB) para os segmentos transcodados (do setting castRamGb). */
+  ramGb: number
 }
