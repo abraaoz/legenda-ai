@@ -124,6 +124,9 @@ export class CastConnection {
   private reqId = 1
   private pending = new Map<number, Pending>()
   private heartbeat: ReturnType<typeof setInterval> | null = null
+  // O receiver só empurra MEDIA_STATUS em mudanças de estado (play/pause/seek),
+  // não durante a reprodução. Pollamos GET_STATUS pra barra de tempo andar.
+  private statusPoll: ReturnType<typeof setInterval> | null = null
   private transportId = ''
   private mediaSessionId: number | null = null
   // Source id único por conexão — evita o receiver fechar como duplicata de
@@ -265,6 +268,21 @@ export class CastConnection {
     const res = await this.request(NS_MEDIA, req, this.transportId)
     const st = (res.status as Array<Record<string, unknown>> | undefined)?.[0]
     if (st?.mediaSessionId) this.mediaSessionId = st.mediaSessionId as number
+    this.startStatusPoll()
+  }
+
+  /** Pede MEDIA_STATUS periodicamente pra atualizar o tempo decorrido na UI. */
+  private startStatusPoll(): void {
+    if (this.statusPoll) clearInterval(this.statusPoll)
+    this.statusPoll = setInterval(() => {
+      if (this.mediaSessionId == null || !this.transportId) return
+      // fire-and-forget: a resposta chega como MEDIA_STATUS e flui pro onStatus
+      this.write(
+        NS_MEDIA,
+        { type: 'GET_STATUS', mediaSessionId: this.mediaSessionId, requestId: this.reqId++ },
+        this.transportId
+      )
+    }, 1000)
   }
 
   private media(type: string, extra: Record<string, unknown> = {}): Promise<Record<string, unknown>> {
@@ -296,6 +314,8 @@ export class CastConnection {
   private cleanup(): void {
     if (this.heartbeat) clearInterval(this.heartbeat)
     this.heartbeat = null
+    if (this.statusPoll) clearInterval(this.statusPoll)
+    this.statusPoll = null
     for (const p of this.pending.values()) p.reject(new Error('Cast: conexão encerrada'))
     this.pending.clear()
     try {
