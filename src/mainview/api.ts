@@ -80,6 +80,8 @@ export const api = {
   listAiModels: () => call.listAiModels({}),
   validateAzure: () => call.validateAzure({}),
   aiTranslateEmbedded: (args: AiTranslateArgs) => call.aiTranslateEmbedded(args),
+  aiTranslateSrt: (videoPath: string, srtPath: string, sourceLanguage: string) =>
+    call.aiTranslateSrt({ videoPath, srtPath, sourceLanguage }),
   translationStatus: (args: AiTranslateArgs) => call.translationStatus(args),
   cancelTranslate: (path: string) => call.cancelTranslate({ path }),
   checkDependencies: () => call.checkDependencies({}),

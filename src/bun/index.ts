@@ -18,6 +18,7 @@ import { azureValidate } from './lib/azure'
 import { getSettings, saveSettings } from './lib/settings'
 import {
   aiTranslateEmbedded,
+  aiTranslateSrtFile,
   createAppleTranslator,
   createAzureTranslator,
   createOllamaTranslator,
@@ -46,6 +47,18 @@ const VIDEO_TYPES = 'mp4,mkv,avi,mov,m4v,wmv,flv,webm,mpg,mpeg,ts'
 
 // Traduções em andamento, para permitir cancelamento (por caminho do vídeo).
 const activeTranslations = new Map<string, AbortController>()
+
+/** Escolhe o motor de tradução conforme as settings (Apple precisa do idioma de origem). */
+async function pickTranslator(s: AppSettings, sourceLanguage: string) {
+  return s.translationProvider === 'apple'
+    ? await createAppleTranslator(sourceLanguage, s.language)
+    : s.translationProvider === 'azure'
+      ? createAzureTranslator(
+          { key: s.azureKey, region: s.azureRegion, endpoint: s.azureEndpoint },
+          s.language
+        )
+      : createOllamaTranslator(s.ollamaUrl, s.ollamaModel, s.language)
+}
 
 /** Loga início/fim/erro de cada chamada RPC (backend verboso). */
 function logged<A, R>(name: string, fn: (arg: A) => R | Promise<R>): (arg: A) => Promise<R> {
@@ -149,15 +162,7 @@ const rpc = BrowserView.defineRPC<LegendaRPC>({
         'aiTranslateEmbedded',
         async ({ path, index, sourceLanguage, isText }) => {
           const s = await getSettings()
-          const translator =
-            s.translationProvider === 'apple'
-              ? await createAppleTranslator(sourceLanguage, s.language)
-              : s.translationProvider === 'azure'
-                ? createAzureTranslator(
-                    { key: s.azureKey, region: s.azureRegion, endpoint: s.azureEndpoint },
-                    s.language
-                  )
-                : createOllamaTranslator(s.ollamaUrl, s.ollamaModel, s.language)
+          const translator = await pickTranslator(s, sourceLanguage)
           logi(`Motor de tradução: ${s.translationProvider}${isText ? '' : ' (com OCR)'}`)
           const controller = new AbortController()
           activeTranslations.set(path, controller)
@@ -174,6 +179,23 @@ const rpc = BrowserView.defineRPC<LegendaRPC>({
           }
         }
       ),
+      aiTranslateSrt: logged('aiTranslateSrt', async ({ videoPath, srtPath, sourceLanguage }) => {
+        const s = await getSettings()
+        const translator = await pickTranslator(s, sourceLanguage)
+        logi(`Traduzindo legenda .srt externa (motor: ${s.translationProvider})`)
+        const controller = new AbortController()
+        activeTranslations.set(videoPath, controller)
+        try {
+          return await aiTranslateSrtFile(
+            { videoPath, srtPath, targetCode: s.language },
+            translator,
+            (done, total) => sendProgress({ path: videoPath, done, total, phase: 'translate' }),
+            controller.signal
+          )
+        } finally {
+          activeTranslations.delete(videoPath)
+        }
+      }),
       validateAzure: logged('validateAzure', async () => {
         const { azureKey, azureRegion, azureEndpoint } = await getSettings()
         return azureValidate({ key: azureKey, region: azureRegion, endpoint: azureEndpoint })

@@ -198,18 +198,48 @@ export async function aiTranslateEmbedded(
   onOcrProgress: (done: number, total: number) => void,
   signal?: AbortSignal
 ): Promise<TranslateResult> {
-  // 1. produz o .srt de origem (texto direto ou OCR de PGS), preservando tempos
+  // Produz o .srt de origem (texto direto ou OCR de PGS), preservando tempos.
   const sourceSrt = await produceSourceSrt(args, onOcrProgress, signal)
+  const targetPath = targetSrtPath(args.path, args.targetCode)
+  return translateSrtCore(sourceSrt, targetPath, args.targetCode, translate, onProgress, signal)
+}
+
+/**
+ * Traduz um arquivo `.srt` EXTERNO (já existente) para o idioma alvo, gravando
+ * "<nome-do-vídeo>.<idioma-alvo>.srt" ao lado. Idempotente/retomável.
+ */
+export async function aiTranslateSrtFile(
+  args: { videoPath: string; srtPath: string; targetCode: string },
+  translate: BatchTranslator,
+  onProgress: (done: number, total: number) => void,
+  signal?: AbortSignal
+): Promise<TranslateResult> {
+  const targetPath = targetSrtPath(args.videoPath, args.targetCode)
+  return translateSrtCore(args.srtPath, targetPath, args.targetCode, translate, onProgress, signal)
+}
+
+/**
+ * Núcleo da tradução, idempotente e retomável: lê o `.srt` de origem, traduz em
+ * lotes preservando os timestamps e grava o alvo a CADA lote. Se já existir um
+ * parcial alinhado, retoma de onde parou. Cancelar mantém o que já está em disco.
+ */
+async function translateSrtCore(
+  sourceSrt: string,
+  targetPath: string,
+  targetCode: string,
+  translate: BatchTranslator,
+  onProgress: (done: number, total: number) => void,
+  signal?: AbortSignal
+): Promise<TranslateResult> {
   const sourceCues = parseSrt(await Bun.file(sourceSrt).text())
   if (sourceCues.length === 0) throw new Error('A legenda de origem está vazia.')
 
-  // 2. retoma de um parcial existente, se ele alinhar com a fonte (mesmos timestamps)
-  const targetPath = targetSrtPath(args.path, args.targetCode)
   // Origem e destino podem coincidir se os idiomas forem iguais — não
   // sobrescreve a fonte com ela mesma.
   if (targetPath === sourceSrt) {
     throw new Error('Idioma de origem e destino são iguais — nada a traduzir.')
   }
+  // Retoma de um parcial existente, se ele alinhar com a fonte (mesmos timestamps).
   const translated: Cue[] = []
   if (await Bun.file(targetPath).exists()) {
     const parsed = parseSrt(await Bun.file(targetPath).text())
@@ -226,7 +256,7 @@ export async function aiTranslateEmbedded(
   }
   const batchSize = translate.batchSize
   logi(
-    `${translated.length > 0 ? `Retomando da fala ${translated.length + 1}` : 'Traduzindo'} de ${sourceCues.length} para ${languageName(args.targetCode)} (lotes de ${batchSize})`
+    `${translated.length > 0 ? `Retomando da fala ${translated.length + 1}` : 'Traduzindo'} de ${sourceCues.length} para ${languageName(targetCode)} (lotes de ${batchSize})`
   )
 
   // 3. traduz em lotes, gravando o arquivo após CADA lote

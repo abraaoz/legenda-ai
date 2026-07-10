@@ -88,6 +88,9 @@ interface VideoState {
   /** Faixa aguardando na fila de tradução (ainda não começou). */
   queuedIndex?: number;
   translatingIndex?: number;
+  /** Caminho da legenda .srt externa sendo traduzida (ou aguardando na fila). */
+  translatingSrt?: string;
+  queuedSrt?: string;
   translateDone?: number;
   translateTotal?: number;
   translatePhase?: "ocr" | "translate";
@@ -122,6 +125,22 @@ function folderOf(path: string): string {
 /** URL file:// para abrir um caminho local no gerenciador de arquivos. */
 function fileUrl(path: string): string {
   return `file://${path.split("/").map(encodeURIComponent).join("/")}`;
+}
+
+/** Normaliza um código/token de idioma para uma chave comparável
+ * (pt-br/pt-pt/por → pt; en/eng → en; …). '' fica '' (idioma desconhecido). */
+function langKey(code: string): string {
+  const c = (code || "").toLowerCase();
+  const map: Record<string, string> = {
+    "pt-br": "pt", "pt-pt": "pt", pt: "pt", por: "pt",
+    en: "en", eng: "en",
+    es: "es", spa: "es",
+    fr: "fr", fra: "fr", fre: "fr",
+    it: "it", ita: "it",
+    de: "de", deu: "de", ger: "de",
+    ja: "ja", jpn: "ja",
+  };
+  return map[c] ?? c;
 }
 
 /** Segundos → mm:ss. */
@@ -438,6 +457,40 @@ export default function App() {
     }
   }
 
+  // Enfileira a tradução de uma legenda .srt EXTERNA (mesma fila de máx. 2).
+  function aiTranslateSrt(video: VideoState, srt: ExternalSubtitle): void {
+    if (!video.info) return;
+    const videoPath = video.info.path;
+    patch(video.id, { queuedSrt: srt.path, message: undefined });
+    qEnqueue(`${video.id}:srt:${srt.path}`, () =>
+      runTranslateSrt(video.id, videoPath, srt),
+    );
+  }
+
+  async function runTranslateSrt(
+    videoId: string,
+    videoPath: string,
+    srt: ExternalSubtitle,
+  ): Promise<void> {
+    patch(videoId, {
+      queuedSrt: undefined,
+      translatingSrt: srt.path,
+      translateDone: 0,
+      translateTotal: 0,
+      translatePhase: "translate",
+    });
+    try {
+      await api.aiTranslateSrt(videoPath, srt.path, srt.language);
+      patch(videoId, { translatingSrt: undefined });
+      void refreshExternal(videoId, videoPath);
+    } catch (err) {
+      patch(videoId, {
+        translatingSrt: undefined,
+        message: `Falha ao traduzir a legenda: ${(err as Error).message}`,
+      });
+    }
+  }
+
   // Enfileira UMA faixa por vídeo (a 1ª traduzível e ainda não concluída).
   function translateAll(): void {
     for (const video of videos) {
@@ -458,11 +511,15 @@ export default function App() {
     qClearPending();
     setVideos((prev) =>
       prev.map((v) =>
-        v.queuedIndex !== undefined ? { ...v, queuedIndex: undefined } : v,
+        v.queuedIndex !== undefined || v.queuedSrt !== undefined
+          ? { ...v, queuedIndex: undefined, queuedSrt: undefined }
+          : v,
       ),
     );
     const active = videos.filter(
-      (v) => v.translatingIndex !== undefined && v.info,
+      (v) =>
+        (v.translatingIndex !== undefined || v.translatingSrt !== undefined) &&
+        v.info,
     );
     await Promise.all(active.map((v) => api.cancelTranslate(v.info!.path)));
   }
@@ -477,7 +534,14 @@ export default function App() {
     if (video.queuedIndex !== undefined) {
       qCancelPending(`${video.id}:${video.queuedIndex}`);
     }
-    if (video.translatingIndex !== undefined && video.info) {
+    if (video.queuedSrt !== undefined) {
+      qCancelPending(`${video.id}:srt:${video.queuedSrt}`);
+    }
+    if (
+      (video.translatingIndex !== undefined ||
+        video.translatingSrt !== undefined) &&
+      video.info
+    ) {
       await api.cancelTranslate(video.info.path);
     }
     setVideos((prev) => prev.filter((v) => v.id !== video.id));
@@ -626,7 +690,9 @@ export default function App() {
               const anyBusy = videos.some(
                 (v) =>
                   v.translatingIndex !== undefined ||
-                  v.queuedIndex !== undefined,
+                  v.queuedIndex !== undefined ||
+                  v.translatingSrt !== undefined ||
+                  v.queuedSrt !== undefined,
               );
               const canTranslateAny = videos.some(
                 (v) =>
@@ -778,7 +844,9 @@ export default function App() {
                         const queued = video.queuedIndex === sub.index;
                         const busy =
                           video.translatingIndex !== undefined ||
-                          video.queuedIndex !== undefined;
+                          video.queuedIndex !== undefined ||
+                          video.translatingSrt !== undefined ||
+                          video.queuedSrt !== undefined;
                         const complete =
                           !!st && st.total > 0 && st.done >= st.total;
                         const partial =
@@ -866,41 +934,90 @@ export default function App() {
                   </div>
                 )}
 
-                {video.info && video.info.external.length > 0 && (
-                  <div className="embedded">
-                    <p className="section-label">
-                      📄 Legendas .srt no disco (ao lado do vídeo)
-                    </p>
-                    <ul className="results">
-                      {video.info.external.map((srt) => (
-                        <li key={srt.path}>
-                          <div className="result-info">
-                            <span className="result-title">
-                              {srt.language && (
-                                <span className="badge">
-                                  {srt.language.toUpperCase()}
-                                </span>
-                              )}
-                              {srt.name}
-                            </span>
-                            <span className="muted">{fileSize(srt.size)}</span>
-                          </div>
-                          <button
-                            className="ghost sm"
-                            title="Abrir a pasta do arquivo"
-                            onClick={() =>
-                              api.openExternal(fileUrl(folderOf(srt.path)))
-                            }
-                          >
-                            Abrir pasta
-                          </button>
-                        </li>
-                      ))}
-                    </ul>
-                  </div>
-                )}
+                {video.info &&
+                  video.info.external.length > 0 &&
+                  (() => {
+                    const targetKey = langKey(settings.language);
+                    // Já existe alguma .srt no idioma alvo? (então nada a traduzir)
+                    const hasTargetSrt = video.info.external.some(
+                      (s) => s.language && langKey(s.language) === targetKey,
+                    );
+                    const videoBusy =
+                      video.translatingIndex !== undefined ||
+                      video.queuedIndex !== undefined ||
+                      video.translatingSrt !== undefined ||
+                      video.queuedSrt !== undefined;
+                    return (
+                      <div className="embedded">
+                        <p className="section-label">
+                          📄 Legendas .srt no disco (ao lado do vídeo)
+                        </p>
+                        <ul className="results">
+                          {video.info.external.map((srt) => {
+                            const isTarget =
+                              !!srt.language &&
+                              langKey(srt.language) === targetKey;
+                            const translatingThis =
+                              video.translatingSrt === srt.path;
+                            const queuedThis = video.queuedSrt === srt.path;
+                            return (
+                              <li key={srt.path}>
+                                <div className="result-info">
+                                  <span className="result-title">
+                                    {srt.language && (
+                                      <span className="badge">
+                                        {srt.language.toUpperCase()}
+                                      </span>
+                                    )}
+                                    {srt.name}
+                                  </span>
+                                  <span className="muted">
+                                    {fileSize(srt.size)}
+                                  </span>
+                                </div>
+                                <div className="btn-group">
+                                  {!isTarget && (
+                                    <button
+                                      className="primary sm"
+                                      disabled={
+                                        hasTargetSrt || !aiReady || videoBusy
+                                      }
+                                      title={
+                                        hasTargetSrt
+                                          ? `Já existe uma legenda .srt em ${targetLabel}`
+                                          : aiReady
+                                            ? `Traduzir esta legenda para ${targetLabel}`
+                                            : "Configure o motor de tradução nas configurações"
+                                      }
+                                      onClick={() => aiTranslateSrt(video, srt)}
+                                    >
+                                      {queuedThis
+                                        ? "Na fila…"
+                                        : translatingThis
+                                          ? "Traduzindo…"
+                                          : `Traduzir → ${settings.language.toUpperCase()}`}
+                                    </button>
+                                  )}
+                                  <button
+                                    className="ghost sm"
+                                    title="Abrir a pasta do arquivo"
+                                    onClick={() =>
+                                      api.openExternal(fileUrl(folderOf(srt.path)))
+                                    }
+                                  >
+                                    Abrir pasta
+                                  </button>
+                                </div>
+                              </li>
+                            );
+                          })}
+                        </ul>
+                      </div>
+                    );
+                  })()}
 
-                {video.translatingIndex !== undefined && (
+                {(video.translatingIndex !== undefined ||
+                  video.translatingSrt !== undefined) && (
                   <div className="progress">
                     <div className="progress-head">
                       <span className="muted">

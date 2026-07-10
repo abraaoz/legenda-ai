@@ -44,6 +44,10 @@ export type LegendaRPC = {
       listAiModels: { params: Record<string, never>; response: OllamaStatus }
       validateAzure: { params: Record<string, never>; response: ValidateResult }
       aiTranslateEmbedded: { params: AiTranslateArgs; response: TranslateResult }
+      aiTranslateSrt: {
+        params: { videoPath: string; srtPath: string; sourceLanguage: string }
+        response: TranslateResult
+      }
       translationStatus: { params: AiTranslateArgs; response: TranslationStatus }
       cancelTranslate: { params: { path: string }; response: boolean }
       checkDependencies: { params: Record<string, never>; response: DependencyStatus[] }
