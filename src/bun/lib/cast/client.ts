@@ -106,6 +106,8 @@ export interface CastMedia {
   /** MIME do vídeo, ex.: "video/mp4", "video/x-matroska". */
   contentType: string
   title?: string
+  /** Duração total em segundos (ajuda a barra na TV, útil no modo transcode). */
+  durationSec?: number
   /** URL da legenda em VTT (opcional). */
   subtitleUrl?: string
   subtitleLang?: string
@@ -238,6 +240,7 @@ export class CastConnection {
       streamType: 'BUFFERED',
       metadata: { metadataType: 0, title: media.title ?? '' }
     }
+    if (media.durationSec && media.durationSec > 0) info.duration = media.durationSec
     const req: Record<string, unknown> = { type: 'LOAD', media: info, autoplay: true, currentTime: 0 }
     if (media.subtitleUrl) {
       info.tracks = [
