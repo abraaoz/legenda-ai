@@ -31,8 +31,16 @@ Pegue a versão mais recente na página de **[Releases](https://github.com/abraa
 - **Linux** → baixe o `.tar.gz`.
 
 > ⚠️ O app ainda **não é assinado**, então na primeira vez o sistema pode avisar
-> que é de "desenvolvedor não identificado". No Mac: clique com o botão direito →
-> **Abrir**. No Windows: **Mais informações → Executar assim mesmo**.
+> que é de "desenvolvedor não identificado".
+>
+> **No Mac**, depois de arrastar pra Aplicativos, rode uma vez no Terminal para
+> liberar a abertura:
+>
+> ```sh
+> sudo xattr -d com.apple.quarantine /Applications/Legenda\ AI\ pra\ mim.app
+> ```
+>
+> **No Windows**: **Mais informações → Executar assim mesmo**.
 
 Depois de instalado, o app se **atualiza sozinho** (menu **Legenda AI pra mim →
 Buscar atualizações…**).
