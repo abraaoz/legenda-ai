@@ -2,80 +2,86 @@
 
 # Legenda AI pra mim
 
-App de computador (Mac, Windows e Linux) para **baixar, traduzir e assistir**
-legendas dos seus vídeos — direto na sua TV, se quiser. Simples, offline quando
-dá, e sem enviar seus arquivos pra lugar nenhum.
+**English** · [Português](README.pt-BR.md)
 
-## O que ele faz
+A desktop app (Mac, Windows, and Linux) to **download, translate, and watch**
+subtitles for your videos — straight on your TV, if you like. Simple, offline
+when it can be, and it never sends your files anywhere.
 
-- 🔎 **Baixa a legenda certa** — acha no OpenSubtitles pelo "impressão digital" do
-  vídeo, então vem **100% sincronizada** (nada de legenda adiantada/atrasada).
-- 🌎 **Traduz legendas** para o seu idioma, **mantendo a sincronia**. Funciona com
-  legenda embutida no vídeo (MKV) ou com um arquivo `.srt` que você já tem. Três
-  opções de tradução:
-  - **Apple** — no próprio Mac, offline e grátis (macOS 15+);
-  - **Ollama** — offline no seu computador (grátis, precisa instalar);
-  - **Azure** — na nuvem (precisa de uma conta Microsoft).
-- 👁️ **Lê legendas "em imagem"** de Blu-ray (aquelas que não são texto) e vira
-  texto pra poder traduzir.
-- 📺 **Toca na TV** — manda o vídeo **com a legenda** pra sua TV, seja
-  **Chromecast/Google TV** ou **Samsung Smart TV** (e outras TVs com DLNA), com
-  play/pause e a barra de tempo funcionando (pular pra frente/trás). Converte o
-  vídeo quando a TV não aceita o formato.
+## What it does
 
-## Baixar e instalar
+- 🔎 **Downloads the right subtitle** — finds it on OpenSubtitles by your video's
+  "fingerprint", so it comes **perfectly in sync** (no early/late subtitles).
+- 🌎 **Translates subtitles** into your language while **keeping the timing**.
+  Works with subtitles embedded in the video (MKV) or with a `.srt` file you
+  already have. Three translation options:
+  - **Apple** — right on your Mac, offline and free (macOS 15+);
+  - **Ollama** — offline on your computer (free, needs installing);
+  - **Azure** — in the cloud (needs a Microsoft account).
+- 👁️ **Reads "image" subtitles** from Blu-rays (the ones that aren't text) and
+  turns them into text so they can be translated.
+- 📺 **Plays on your TV** — sends the video **with the subtitle** to your TV,
+  whether **Chromecast/Google TV** or a **Samsung Smart TV** (and other DLNA
+  TVs), with play/pause and a working time bar (skip forward/back). It converts
+  the video when the TV can't handle the format.
+- 🌐 **Multi-language app** — the interface is available in English, Portuguese,
+  Spanish, French, Italian, German, and Japanese (**⚙️ Settings → Languages**).
 
-Pegue a versão mais recente na página de **[Releases](https://github.com/abraaoz/legenda-ai/releases/latest)**:
+## Download and install
 
-- **Mac (Apple Silicon)** → baixe o `.dmg`, abra e arraste pra Aplicativos.
-- **Windows** → baixe o `.zip`, extraia e rode.
-- **Linux** → baixe o `.tar.gz`.
+Grab the latest version from the **[Releases](https://github.com/abraaoz/legenda-ai/releases/latest)** page:
 
-> ⚠️ O app ainda **não é assinado**, então na primeira vez o sistema pode avisar
-> que é de "desenvolvedor não identificado".
+- **Mac (Apple Silicon)** → download the `.dmg`, open it, and drag to Applications.
+- **Windows** → download the `.zip`, extract, and run.
+- **Linux** → download the `.tar.gz`.
+
+> ⚠️ The app is **not signed yet**, so the first time your system may warn that
+> it's from an "unidentified developer".
 >
-> **No Mac**, depois de arrastar pra Aplicativos, rode uma vez no Terminal para
-> liberar a abertura:
+> **On Mac**, after dragging it to Applications, run this once in Terminal to
+> allow it to open:
 >
 > ```sh
 > sudo xattr -d com.apple.quarantine /Applications/Legenda\ AI\ pra\ mim.app
 > ```
 >
-> **No Windows**: **Mais informações → Executar assim mesmo**.
+> **On Windows**: **More info → Run anyway**.
 
-Depois de instalado, o app se **atualiza sozinho** (menu **Legenda AI pra mim →
-Buscar atualizações…**).
+Once installed, the app **updates itself** (menu **Legenda AI pra mim → Check for
+updates…**).
 
-## O que você precisa ter
+## What you need
 
-- **ffmpeg** (para ler legendas embutidas e converter vídeo pra TV):
-  no Mac, `brew install ffmpeg`. O app avisa se estiver faltando.
-- **Chave do OpenSubtitles** (só para baixar legendas): crie grátis em
-  [opensubtitles.com](https://www.opensubtitles.com) → *Consumers* → gere uma
-  *API Key* e cole em **⚙️ Configurações**.
-- Para **traduzir**: no Mac não precisa de nada (usa o tradutor da Apple). Fora do
-  Mac, instale o [Ollama](https://ollama.com) ou use uma chave do Azure.
+- **ffmpeg** (to read embedded subtitles and convert video for the TV): on Mac,
+  `brew install ffmpeg`. The app tells you if it's missing.
+- **OpenSubtitles key** (only to download subtitles): create one for free at
+  [opensubtitles.com](https://www.opensubtitles.com) → *Consumers* → generate an
+  *API Key* and paste it into **⚙️ Settings**.
+- To **translate**: on Mac you need nothing (it uses Apple's translator). Off Mac,
+  install [Ollama](https://ollama.com) or use an Azure key.
 
-## Como usar
+## How to use
 
-1. **Adicione vídeos** — botão *Selecionar vídeos* (ou uma pasta inteira).
-2. **Baixar legenda** — *Buscar no OpenSubtitles* → *Baixar* na que tiver o selo
-   de sincronizada.
-3. **Traduzir** — clique em *Traduzir* numa faixa embutida ou numa legenda `.srt`
-   que não esteja no seu idioma. A legenda traduzida é salva **ao lado do vídeo**
-   (ex.: `Filme.pt-br.srt`), pronta pra qualquer player.
-4. **Assistir na TV** — *📺 Tocar na TV*, escolha o Chromecast e a legenda, e dê
-   play. Use a barrinha de tempo para pular.
+1. **Pick your languages** — in **⚙️ Settings → Languages**, set the app language
+   and the subtitle language (used for both downloading and translating).
+2. **Add videos** — the *Select videos* button (or a whole folder).
+3. **Download a subtitle** — *Search on OpenSubtitles* → *Download* on the one
+   with the "sync" badge.
+4. **Translate** — click *Translate* on an embedded track or on a `.srt` subtitle
+   that isn't in your language. The translated subtitle is saved **next to the
+   video** (e.g., `Movie.pt-BR.srt`), ready for any player.
+5. **Watch on the TV** — *📺 Play on TV*, pick the TV and the subtitle, and hit
+   play. Use the time bar to skip.
 
-Tudo o que o app faz aparece em tempo real na **coluna de log** à direita.
+Everything the app does shows up in real time in the **log column** on the right.
 
-## Privacidade
+## Privacy
 
-Seus vídeos **nunca saem do seu computador**. A tradução pela Apple/Ollama é 100%
-local. Só o texto da legenda é enviado se você escolher o Azure (nuvem).
+Your videos **never leave your computer**. Translation via Apple/Ollama is 100%
+local. Only the subtitle text is sent if you choose Azure (cloud).
 
 ---
 
-Feito com [Bun](https://bun.sh) + [Electrobun](https://electrobun.dev) (sem
-Node/Electron). Quer contribuir ou entender por dentro? Veja o [DEV.md](DEV.md).
-Licença MIT.
+Built with [Bun](https://bun.sh) + [Electrobun](https://electrobun.dev) (no
+Node/Electron). Want to contribute or look under the hood? See [DEV.md](DEV.md).
+MIT License.

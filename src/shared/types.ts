@@ -74,6 +74,9 @@ export interface AppSettings {
   apiKey: string
   /** Idioma padrão/alvo das legendas (código ISO usado pela API e pela tradução). */
   language: string
+  /** Idioma da INTERFACE do app (só a UI; não afeta as legendas). Default 'en'.
+   * Um dos mesmos códigos oferecidos como idioma alvo. */
+  uiLanguage: string
   /** Motor de tradução de legendas. */
   translationProvider: TranslationProvider
   /** URL do servidor Ollama (tradução local). */

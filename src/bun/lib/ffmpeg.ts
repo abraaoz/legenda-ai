@@ -1,6 +1,7 @@
 import type { DownloadResult, EmbeddedSubtitle } from '../../shared/types'
 import { logd, logi } from './logger'
 import { basename, dirname, extname, joinPath } from './paths'
+import { canonicalLang } from '../../shared/lang'
 
 // Diretórios comuns onde ffmpeg/ffprobe ficam quando o PATH do app é mínimo
 // (caso típico de um .app aberto pelo Finder no macOS).
@@ -107,7 +108,8 @@ export async function extractEmbedded(
   if (!ffmpeg) throw new Error('ffmpeg não encontrado na máquina.')
 
   const base = basename(path, extname(path))
-  const lang = language && language !== 'und' ? language : `faixa${index}`
+  // canoniza o código da faixa pro sufixo (ffprobe dá "eng" → arquivo `.en.srt`)
+  const lang = language && language !== 'und' ? canonicalLang(language) : `faixa${index}`
   // Texto → converte para .srt; imagem (PGS/VobSub) → copia bruto para .sup.
   const ext = isText ? 'srt' : 'sup'
   const codecArgs = isText ? ['-c:s', 'srt'] : ['-c:s', 'copy']

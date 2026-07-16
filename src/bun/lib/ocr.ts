@@ -1,6 +1,7 @@
 import { resolveBinary } from './ffmpeg'
 import { logi } from './logger'
 import { basename, dirname, extname, joinPath } from './paths'
+import { canonicalLang } from '../../shared/lang'
 import { parsePgs, type SubtitleImage } from './pgs'
 import { type Cue, parseSrt, serializeSrt } from './srt'
 import { hasVision, resolveVisionOcr, visionLang, visionOcrChunk } from './vision'
@@ -179,7 +180,8 @@ export async function ocrPgsToSrt(
 
   const srtPath = joinPath(
     dirname(videoPath),
-    `${basename(videoPath, extname(videoPath))}.${language}.srt`
+    // canônico: a faixa vem "eng" do ffprobe → grava `.en.srt` (padrão Jellyfin)
+    `${basename(videoPath, extname(videoPath))}.${canonicalLang(language)}.srt`
   )
   const markerPath = ocrMarkerPath(srtPath)
 

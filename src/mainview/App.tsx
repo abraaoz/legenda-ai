@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { AppLogo } from "./AppLogo";
 import { api, onCastStatus, onLog, onTranslateProgress } from "./api";
+import { UI_LANG_CODES, langLabel, translate, type TKey } from "./i18n";
 import type {
   AppSettings,
   CastDevice,
@@ -24,16 +25,9 @@ function formatLogTime(ms: number): string {
   );
 }
 
-const LANGUAGES: Array<{ code: string; label: string }> = [
-  { code: "pt-br", label: "Português (Brasil)" },
-  { code: "pt-pt", label: "Português (Portugal)" },
-  { code: "en", label: "Inglês" },
-  { code: "es", label: "Espanhol" },
-  { code: "fr", label: "Francês" },
-  { code: "it", label: "Italiano" },
-  { code: "de", label: "Alemão" },
-  { code: "ja", label: "Japonês" },
-];
+// Idiomas oferecidos como ALVO das legendas (o rótulo vem do i18n, no idioma
+// da UI). Os mesmos códigos são oferecidos como idioma da interface.
+const LANGUAGE_CODES = ["pt-BR", "pt-PT", "en", "es", "fr", "it", "de", "ja"];
 
 type VideoStatus = "analyzing" | "ready" | "error";
 
@@ -154,7 +148,8 @@ function fmtTime(sec: number): string {
 export default function App() {
   const [settings, setSettings] = useState<AppSettings>({
     apiKey: "",
-    language: "pt-br",
+    language: "pt-BR",
+    uiLanguage: "en",
     translationProvider: "ollama",
     ollamaUrl: "http://localhost:11434",
     ollamaModel: "",
@@ -170,6 +165,20 @@ export default function App() {
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const logBodyRef = useRef<HTMLDivElement>(null);
 
+  // Pastas selecionadas (re-varridas no refresh, ao focar a janela / botão).
+  const [roots, setRoots] = useState<string[]>([]);
+  const [refreshing, setRefreshing] = useState(false);
+  // Espelhos em ref: o listener de foco lê o estado atual sem closure velha.
+  const videosRef = useRef(videos);
+  const rootsRef = useRef(roots);
+  const refreshingRef = useRef(false);
+  useEffect(() => {
+    videosRef.current = videos;
+  }, [videos]);
+  useEffect(() => {
+    rootsRef.current = roots;
+  }, [roots]);
+
   // Cast (Tocar na TV)
   const [castStatus, setCastStatus] = useState<CastPlaybackStatus | null>(null);
   const [castPickerFor, setCastPickerFor] = useState<string | null>(null);
@@ -178,9 +187,10 @@ export default function App() {
   const [pickDevice, setPickDevice] = useState("");
   const [pickSub, setPickSub] = useState("");
 
-  const targetLabel =
-    LANGUAGES.find((l) => l.code === settings.language)?.label ??
-    settings.language;
+  // Tradutor de strings da UI, no idioma escolhido nas Configurações.
+  const t = (key: TKey, params?: Record<string, string | number>): string =>
+    translate(settings.uiLanguage, key, params);
+  const targetLabel = langLabel(settings.uiLanguage, settings.language);
   const aiReady =
     settings.translationProvider === "apple"
       ? true // on-device; sem credencial nem modelo a configurar
@@ -193,6 +203,27 @@ export default function App() {
       setSettings(s);
       if (!s.apiKey) setShowSettings(true);
     });
+  }, []);
+
+  // Re-varre o disco quando a janela volta ao foco (arquivos podem ter sido
+  // adicionados/removidos/renomeados por fora). Debounce pra não repetir.
+  useEffect(() => {
+    let last = 0;
+    const trigger = (): void => {
+      if (document.visibilityState === "hidden") return;
+      const now = Date.now();
+      if (now - last < 2000) return;
+      last = now;
+      void refresh();
+    };
+    window.addEventListener("focus", trigger);
+    document.addEventListener("visibilitychange", trigger);
+    return () => {
+      window.removeEventListener("focus", trigger);
+      document.removeEventListener("visibilitychange", trigger);
+    };
+    // refresh usa refs internamente — seguro registrar só uma vez.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // Estado de reprodução na TV (Chromecast) em tempo real.
@@ -313,9 +344,75 @@ export default function App() {
   async function pickFolder(): Promise<void> {
     setPickingFolder(true);
     try {
-      await addPaths(await api.selectFolder());
+      const { dir, videos: found } = await api.selectFolder();
+      if (dir) setRoots((r) => (r.includes(dir) ? r : [...r, dir]));
+      await addPaths(found);
     } finally {
       setPickingFolder(false);
+    }
+  }
+
+  /**
+   * Reconcilia a lista com o disco: re-varre as pastas escolhidas (adiciona
+   * novos, remove os que sumiram/renomearam) e atualiza legendas+status dos
+   * sobreviventes. Pasta inacessível (drive ejetado) é IGNORADA — não some com
+   * a lista. Não mexe em vídeos com tradução em andamento.
+   */
+  async function refresh(): Promise<void> {
+    if (refreshingRef.current) return;
+    refreshingRef.current = true;
+    setRefreshing(true);
+    try {
+      const cur = videosRef.current;
+      // 1. re-varre as raízes; pula as inacessíveis (não zera a lista)
+      const scanned = new Set<string>();
+      const reachable: string[] = [];
+      for (const dir of rootsRef.current) {
+        try {
+          const res = await api.listVideosInFolder(dir);
+          if (!res.ok) continue;
+          reachable.push(dir);
+          for (const p of res.videos) scanned.add(p);
+        } catch {
+          // inacessível — ignora esta raiz
+        }
+      }
+      const underReachable = (p: string) =>
+        reachable.some((r) => p === r || p.startsWith(r.replace(/\/?$/, "/")));
+
+      // 2. remove os que sumiram de uma raiz alcançável (deletados/renomeados)
+      const removed = new Set(
+        cur.filter((v) => underReachable(v.path) && !scanned.has(v.path)).map((v) => v.path),
+      );
+      // 3. arquivos AVULSOS (fora de qualquer raiz): confere existência 1 a 1
+      for (const v of cur) {
+        if (removed.has(v.path) || underReachable(v.path)) continue;
+        if (!(await api.pathExists(v.path))) removed.add(v.path);
+      }
+      if (removed.size)
+        setVideos((prev) => prev.filter((v) => !removed.has(v.path)));
+
+      // 4. adiciona os vídeos novos que apareceram nas pastas
+      const curPaths = new Set(cur.map((v) => v.path));
+      const toAdd = [...scanned].filter((p) => !curPaths.has(p));
+      if (toAdd.length) await addPaths(toAdd);
+
+      // 5. sobreviventes: refresca legendas externas + status (barato), exceto
+      //    os que estão traduzindo (não atropela o progresso ao vivo)
+      for (const v of cur) {
+        if (removed.has(v.path) || !v.info) continue;
+        const busy =
+          v.translatingIndex != null ||
+          v.translatingSrt != null ||
+          v.queuedIndex != null ||
+          v.queuedSrt != null;
+        if (busy) continue;
+        await refreshExternal(v.id, v.path);
+        void fetchTranslations(v.id, v.info);
+      }
+    } finally {
+      refreshingRef.current = false;
+      setRefreshing(false);
     }
   }
 
@@ -334,10 +431,7 @@ export default function App() {
       patch(video.id, {
         searching: false,
         results,
-        message:
-          results.length === 0
-            ? "Nenhuma legenda com hash idêntico (o rip do seu arquivo é diferente)."
-            : undefined,
+        message: results.length === 0 ? t("noSyncSubtitle") : undefined,
       });
     } catch (err) {
       patch(video.id, { searching: false, message: (err as Error).message });
@@ -487,7 +581,7 @@ export default function App() {
     } catch (err) {
       patch(videoId, {
         translatingSrt: undefined,
-        message: `Falha ao traduzir a legenda: ${(err as Error).message}`,
+        message: t("translateSubtitleFailed", { msg: (err as Error).message }),
       });
     }
   }
@@ -586,13 +680,15 @@ export default function App() {
         videoPath: video.info.path,
         subtitlePath: sub?.path,
         subtitleLang: sub?.language || undefined,
-        subtitleLabel: sub ? sub.language.toUpperCase() || "Legenda" : undefined,
+        subtitleLabel: sub
+          ? sub.language.toUpperCase() || t("subtitle")
+          : undefined,
         title: video.name,
         ramGb: settings.castRamGb,
       });
     } catch (err) {
       patch(video.id, {
-        message: `Falha ao tocar na TV: ${(err as Error).message}`,
+        message: t("castFailed", { msg: (err as Error).message }),
       });
     }
   }
@@ -615,14 +711,14 @@ export default function App() {
             </span>
             <div>
               <h1>Legenda AI pra mim</h1>
-              <p>Baixe ou traduza legendas sincronizadas para seus vídeos</p>
+              <p>{t("appTagline")}</p>
             </div>
           </div>
           <button
             className="ghost electrobun-webkit-app-region-no-drag"
             onClick={() => setShowSettings(true)}
           >
-            ⚙️ Configurações
+            ⚙️ {t("settings")}
           </button>
         </header>
 
@@ -632,7 +728,7 @@ export default function App() {
               <span className="cast-dev">📺 {castStatus.device}</span>
               <button
                 className="ghost sm"
-                title={castStatus.playerState === "PLAYING" ? "Pausar" : "Tocar"}
+                title={castStatus.playerState === "PLAYING" ? t("pause") : t("play")}
                 onClick={() =>
                   api.castControl(
                     castStatus.playerState === "PLAYING" ? "pause" : "play",
@@ -643,7 +739,7 @@ export default function App() {
               </button>
               <button
                 className="ghost sm"
-                title="Parar"
+                title={t("stop")}
                 onClick={() => api.castControl("stop")}
               >
                 ⏹
@@ -654,7 +750,7 @@ export default function App() {
               </span>
               <div
                 className="cast-track cast-seekable"
-                title="Clique para pular"
+                title={t("seekHint")}
                 onClick={(e) => {
                   if (!castStatus.duration) return;
                   const r = e.currentTarget.getBoundingClientRect();
@@ -676,36 +772,31 @@ export default function App() {
               </div>
               <span className="muted cast-state">
                 {castStatus.playerState === "BUFFERING"
-                  ? "carregando…"
+                  ? t("loadingShort")
                   : castStatus.playerState.toLowerCase()}
               </span>
             </div>
           )}
 
           <section className="dropzone">
-            <p className="dz-title">Adicione seus vídeos</p>
+            <p className="dz-title">{t("addYourVideos")}</p>
             <div className="dz-actions">
               <button
                 className="primary"
                 onClick={pickVideos}
                 disabled={picking}
               >
-                {picking ? "Abrindo…" : "Selecionar vídeos"}
+                {picking ? t("opening") : t("selectVideos")}
               </button>
               <button
                 className="ghost"
                 onClick={pickFolder}
                 disabled={pickingFolder}
               >
-                {pickingFolder ? "Varrendo pasta…" : "📁 Selecionar pasta"}
+                {pickingFolder ? t("scanningFolder") : `📁 ${t("selectFolder")}`}
               </button>
             </div>
-            {!settings.apiKey && (
-              <p className="warn">
-                ⚠️ Configure sua chave da API do OpenSubtitles nas
-                configurações.
-              </p>
-            )}
+            {!settings.apiKey && <p className="warn">{t("apiKeyWarning")}</p>}
           </section>
 
           {videos.length > 0 &&
@@ -731,13 +822,28 @@ export default function App() {
               return (
                 <div className="list-toolbar">
                   <p className="list-count">
-                    {videos.length} vídeo{videos.length > 1 ? "s" : ""} na lista
+                    {t(
+                      videos.length === 1
+                        ? "videosInList_one"
+                        : "videosInList_other",
+                      { count: videos.length },
+                    )}
                   </p>
                   <span className="toolbar-spacer" />
-                  <span className="muted">Fila: até {MAX_CONCURRENT} por vez</span>
+                  <span className="muted">
+                    {t("queueInfo", { n: MAX_CONCURRENT })}
+                  </span>
+                  <button
+                    className="ghost sm"
+                    onClick={() => void refresh()}
+                    disabled={refreshing}
+                    title={t("refreshTitle")}
+                  >
+                    {refreshing ? t("updating") : `🔄 ${t("refresh")}`}
+                  </button>
                   {anyBusy && (
                     <button className="ghost sm" onClick={cancelAll}>
-                      Cancelar tudo
+                      {t("cancelAll")}
                     </button>
                   )}
                   <button
@@ -745,12 +851,17 @@ export default function App() {
                     disabled={!aiReady || !canTranslateAny}
                     title={
                       aiReady
-                        ? `Traduzir 1 faixa de cada vídeo para ${targetLabel} (fila de ${MAX_CONCURRENT})`
-                        : "Configure o motor de tradução nas configurações"
+                        ? t("translateAllTitle", {
+                            lang: targetLabel,
+                            n: MAX_CONCURRENT,
+                          })
+                        : t("translateEngineHint")
                     }
                     onClick={translateAll}
                   >
-                    Traduzir todos → {settings.language.toUpperCase()}
+                    {t("translateAll", {
+                      code: settings.language.toUpperCase(),
+                    })}
                   </button>
                 </div>
               );
@@ -763,8 +874,9 @@ export default function App() {
                   <div className="card-meta">
                     <strong title={video.path}>{video.name}</strong>
                     <span className="muted">
-                      {video.status === "analyzing" && "Calculando hash…"}
-                      {video.status === "error" && `Erro: ${video.error}`}
+                      {video.status === "analyzing" && t("computingHash")}
+                      {video.status === "error" &&
+                        t("errorPrefix", { msg: video.error ?? "" })}
                       {video.info &&
                         `${formatSize(video.info.size)} · hash ${video.info.hash}`}
                     </span>
@@ -773,23 +885,21 @@ export default function App() {
                     <button
                       className="ghost sm"
                       disabled={!video.info || castPickerFor === video.id}
-                      title="Tocar este vídeo numa TV (Chromecast) com a legenda"
+                      title={t("playOnTvTitle")}
                       onClick={() => openCastPicker(video)}
                     >
-                      📺 Tocar na TV
+                      📺 {t("playOnTv")}
                     </button>
                     <button
                       className="primary sm"
                       disabled={video.status !== "ready" || video.searching}
                       onClick={() => search(video)}
                     >
-                      {video.searching
-                        ? "Buscando…"
-                        : "Buscar no OpenSubtitles"}
+                      {video.searching ? t("searching") : t("searchOpenSubtitles")}
                     </button>
                     <button
                       className="ghost sm remove-btn"
-                      title="Remover da lista"
+                      title={t("removeFromList")}
                       onClick={() => removeVideo(video)}
                     >
                       ✕
@@ -799,17 +909,15 @@ export default function App() {
 
                 {castPickerFor === video.id && video.info && (
                   <div className="cast-picker">
-                    <span className="section-label">📺 Tocar na TV</span>
+                    <span className="section-label">📺 {t("playOnTv")}</span>
                     {castDiscovering ? (
-                      <span className="muted">Procurando dispositivos…</span>
+                      <span className="muted">{t("searchingDevices")}</span>
                     ) : castDevices.length === 0 ? (
-                      <span className="muted">
-                        Nenhuma TV encontrada na rede (Chromecast ou DLNA/Samsung).
-                      </span>
+                      <span className="muted">{t("noTvFound")}</span>
                     ) : (
                       <div className="cast-picker-row">
                         <label>
-                          Dispositivo
+                          {t("device")}
                           <select
                             value={pickDevice}
                             onChange={(e) => setPickDevice(e.target.value)}
@@ -823,12 +931,12 @@ export default function App() {
                           </select>
                         </label>
                         <label>
-                          Legenda
+                          {t("subtitle")}
                           <select
                             value={pickSub}
                             onChange={(e) => setPickSub(e.target.value)}
                           >
-                            <option value="">Sem legenda</option>
+                            <option value="">{t("noSubtitle")}</option>
                             {video.info.external.map((s: ExternalSubtitle) => (
                               <option key={s.path} value={s.path}>
                                 {s.name}
@@ -841,7 +949,7 @@ export default function App() {
                           disabled={!pickDevice}
                           onClick={() => startCast(video)}
                         >
-                          ▶ Tocar
+                          ▶ {t("play")}
                         </button>
                       </div>
                     )}
@@ -849,16 +957,14 @@ export default function App() {
                       className="ghost sm"
                       onClick={() => setCastPickerFor(null)}
                     >
-                      Fechar
+                      {t("close")}
                     </button>
                   </div>
                 )}
 
                 {video.info && video.info.embedded.length > 0 && (
                   <div className="embedded">
-                    <p className="section-label">
-                      🎞️ Legendas embutidas no arquivo (já sincronizadas)
-                    </p>
+                    <p className="section-label">{t("embeddedTitle")}</p>
                     <ul className="results">
                       {video.info.embedded.map((sub) => {
                         const st = video.translations?.[sub.index];
@@ -885,52 +991,54 @@ export default function App() {
                             <div className="result-info">
                               <span className="result-title">
                                 {sub.isDefault && (
-                                  <span className="badge">padrão</span>
+                                  <span className="badge">
+                                    {t("badgeDefault")}
+                                  </span>
                                 )}
                                 {sub.isForced && (
-                                  <span className="badge">forced</span>
+                                  <span className="badge">
+                                    {t("badgeForced")}
+                                  </span>
                                 )}
                                 {image && (
                                   <span className="badge badge-img">
-                                    imagem
+                                    {t("badgeImage")}
                                   </span>
                                 )}
-                                {sub.title || `Faixa ${sub.index}`} ·{" "}
+                                {sub.title || t("trackN", { index: sub.index })} ·{" "}
                                 {sub.language}
                               </span>
                               <span className="muted">
                                 {sub.codec}
-                                {canOcr &&
-                                  " · imagem — será convertida por OCR"}
-                                {blockedImage &&
-                                  " · imagem — OCR indisponível (instale o Tesseract)"}
+                                {canOcr && t("imageWillOcr")}
+                                {blockedImage && t("imageOcrUnavailable")}
                               </span>
                             </div>
                             <div className="btn-group">
                               <button
                                 className="ghost sm"
-                                title={
-                                  image
-                                    ? "Extrair a legenda em imagem (.sup)"
-                                    : undefined
-                                }
+                                title={image ? t("extractImageTitle") : undefined}
                                 disabled={video.extractingIndex === sub.index}
                                 onClick={() => extractEmbedded(video, sub)}
                               >
                                 {video.extractingIndex === sub.index
-                                  ? "Extraindo…"
+                                  ? t("extracting")
                                   : image
-                                    ? "Extrair .sup"
-                                    : "Extrair .srt"}
+                                    ? t("extractSup")
+                                    : t("extractSrt")}
                               </button>
                               <button
                                 className={`sm ${partial ? "continue" : "primary"}`}
                                 title={
                                   blockedImage
-                                    ? "Legenda em imagem: OCR indisponível (instale o Tesseract)"
+                                    ? t("translateImageBlockedTitle")
                                     : aiReady
-                                      ? `Traduzir para ${targetLabel} (${settings.translationProvider})${image ? " — via OCR" : ""}`
-                                      : "Configure o motor de tradução (Ollama, Azure ou Apple) nas configurações"
+                                      ? t("translateTrackTitle", {
+                                          lang: targetLabel,
+                                          provider: settings.translationProvider,
+                                          ocr: image ? t("viaOcrSuffix") : "",
+                                        })
+                                      : t("translateEngineTitle")
                                 }
                                 disabled={
                                   blockedImage || !aiReady || complete || busy
@@ -938,16 +1046,24 @@ export default function App() {
                                 onClick={() => aiTranslate(video, sub)}
                               >
                                 {blockedImage
-                                  ? "Requer OCR"
+                                  ? t("requiresOcr")
                                   : queued
-                                    ? "Na fila…"
+                                    ? t("inQueue")
                                     : translating
-                                      ? "Processando…"
+                                      ? t("processing")
                                       : complete
-                                        ? "✔ Traduzido"
+                                        ? t("translated")
                                         : partial
-                                          ? `Continuar ${st!.done}/${st!.total}`
-                                          : `${image ? "OCR + Traduzir" : "Traduzir"} → ${settings.language.toUpperCase()}`}
+                                          ? t("continueProgress", {
+                                              done: st!.done,
+                                              total: st!.total,
+                                            })
+                                          : t("translateArrow", {
+                                              prefix: image
+                                                ? t("ocrAndTranslate")
+                                                : t("translate"),
+                                              code: settings.language.toUpperCase(),
+                                            })}
                               </button>
                             </div>
                           </li>
@@ -972,9 +1088,7 @@ export default function App() {
                       video.queuedSrt !== undefined;
                     return (
                       <div className="embedded">
-                        <p className="section-label">
-                          📄 Legendas .srt no disco (ao lado do vídeo)
-                        </p>
+                        <p className="section-label">{t("externalTitle")}</p>
                         <ul className="results">
                           {video.info.external.map((srt) => {
                             const isTarget =
@@ -1007,28 +1121,34 @@ export default function App() {
                                       }
                                       title={
                                         hasTargetSrt
-                                          ? `Já existe uma legenda .srt em ${targetLabel}`
+                                          ? t("hasTargetTitle", {
+                                              lang: targetLabel,
+                                            })
                                           : aiReady
-                                            ? `Traduzir esta legenda para ${targetLabel}`
-                                            : "Configure o motor de tradução nas configurações"
+                                            ? t("translateThisTitle", {
+                                                lang: targetLabel,
+                                              })
+                                            : t("translateEngineHint")
                                       }
                                       onClick={() => aiTranslateSrt(video, srt)}
                                     >
                                       {queuedThis
-                                        ? "Na fila…"
+                                        ? t("inQueue")
                                         : translatingThis
-                                          ? "Traduzindo…"
-                                          : `Traduzir → ${settings.language.toUpperCase()}`}
+                                          ? t("translating")
+                                          : t("translateShortArrow", {
+                                              code: settings.language.toUpperCase(),
+                                            })}
                                     </button>
                                   )}
                                   <button
                                     className="ghost sm"
-                                    title="Abrir a pasta do arquivo"
+                                    title={t("openFolderTitle")}
                                     onClick={() =>
                                       api.openExternal(fileUrl(folderOf(srt.path)))
                                     }
                                   >
-                                    Abrir pasta
+                                    {t("openFolder")}
                                   </button>
                                 </div>
                               </li>
@@ -1045,22 +1165,22 @@ export default function App() {
                     <div className="progress-head">
                       <span className="muted">
                         {video.translatePhase === "ocr"
-                          ? "Reconhecendo texto (OCR)… "
+                          ? t("ocrPhase")
                           : settings.translationProvider === "azure"
-                            ? "Traduzindo (Azure)… "
+                            ? t("translatingAzure")
                             : settings.translationProvider === "apple"
-                              ? "Traduzindo (Apple)… "
-                              : "Traduzindo com IA (Ollama)… "}
+                              ? t("translatingApple")
+                              : t("translatingOllama")}
                         <strong>
                           {video.translateDone ?? 0}/{video.translateTotal ?? 0}
                         </strong>{" "}
-                        falas
+                        {t("linesWord")}
                       </span>
                       <button
                         className="ghost sm"
                         onClick={() => cancelTranslate(video)}
                       >
-                        Cancelar
+                        {t("cancel")}
                       </button>
                     </div>
                     <div className="progress-track">
@@ -1077,14 +1197,13 @@ export default function App() {
                 )}
 
                 {video.info && !video.info.ffmpegAvailable && (
-                  <p className="muted embedded-hint">
-                    Instale o ffmpeg para detectar e extrair legendas já
-                    embutidas no vídeo.
-                  </p>
+                  <p className="muted embedded-hint">{t("ffmpegHint")}</p>
                 )}
 
                 {video.savedPath && (
-                  <p className="ok">✅ Legenda salva em {video.savedPath}</p>
+                  <p className="ok">
+                    {t("savedTo", { path: video.savedPath })}
+                  </p>
                 )}
                 {video.message && <p className="warn">{video.message}</p>}
 
@@ -1095,13 +1214,17 @@ export default function App() {
                         <div className="result-info">
                           <span className="result-title">
                             {r.fromHashMatch && (
-                              <span className="badge">sync</span>
+                              <span className="badge">{t("badgeSync")}</span>
                             )}
                             {r.release || r.fileName}
                           </span>
                           <span className="muted">
-                            {r.language} ·{" "}
-                            {r.downloadCount.toLocaleString("pt-BR")} downloads
+                            {t("downloadsCount", {
+                              lang: r.language,
+                              n: r.downloadCount.toLocaleString(
+                                settings.uiLanguage,
+                              ),
+                            })}
                             {r.ratings ? ` · ⭐ ${r.ratings}` : ""}
                           </span>
                         </div>
@@ -1111,8 +1234,8 @@ export default function App() {
                           onClick={() => download(video, r)}
                         >
                           {video.downloadingId === r.fileId
-                            ? "Baixando…"
-                            : "Baixar"}
+                            ? t("downloading")
+                            : t("download")}
                         </button>
                       </li>
                     ))}
@@ -1126,12 +1249,12 @@ export default function App() {
 
       <aside className="log-panel">
         <div className="log-head electrobun-webkit-app-region-drag">
-          <span className="section-label">Log do backend</span>
+          <span className="section-label">{t("backendLog")}</span>
           <button
             className="ghost sm electrobun-webkit-app-region-no-drag"
             onClick={() => setLogs([])}
           >
-            Limpar
+            {t("clear")}
           </button>
         </div>
         <div className="log-body" ref={logBodyRef}>
@@ -1142,7 +1265,7 @@ export default function App() {
             </div>
           ))}
           {logs.length === 0 && (
-            <div className="log-empty">Sem eventos ainda…</div>
+            <div className="log-empty">{t("noEventsYet")}</div>
           )}
         </div>
       </aside>
@@ -1150,6 +1273,7 @@ export default function App() {
       {showSettings && (
         <SettingsModal
           settings={settings}
+          t={t}
           onClose={() => setShowSettings(false)}
           onSave={saveSettings}
           onImported={setSettings}
@@ -1161,21 +1285,24 @@ export default function App() {
 
 function SettingsModal({
   settings,
+  t,
   onClose,
   onSave,
   onImported,
 }: {
   settings: AppSettings;
+  t: (key: TKey, params?: Record<string, string | number>) => string;
   onClose: () => void;
   onSave: (s: AppSettings) => void;
   onImported: (s: AppSettings) => void;
 }) {
   const [tab, setTab] = useState<
-    "checklist" | "download" | "translate" | "playback"
-  >("checklist");
+    "languages" | "checklist" | "download" | "translate" | "playback"
+  >("languages");
   const [ioMsg, setIoMsg] = useState("");
   const [apiKey, setApiKey] = useState(settings.apiKey);
   const [language, setLanguage] = useState(settings.language);
+  const [uiLanguage, setUiLanguage] = useState(settings.uiLanguage);
   const [provider, setProvider] = useState(settings.translationProvider);
   const [ollamaUrl, setOllamaUrl] = useState(settings.ollamaUrl);
   const [ollamaModel, setOllamaModel] = useState(settings.ollamaModel);
@@ -1246,6 +1373,7 @@ function SettingsModal({
   function applySettings(s: AppSettings): void {
     setApiKey(s.apiKey);
     setLanguage(s.language);
+    setUiLanguage(s.uiLanguage);
     setProvider(s.translationProvider);
     setOllamaUrl(s.ollamaUrl);
     setOllamaModel(s.ollamaModel);
@@ -1257,7 +1385,7 @@ function SettingsModal({
 
   async function doExport(): Promise<void> {
     const { savedPath } = await api.exportSettings();
-    setIoMsg(savedPath ? `Exportado para ${savedPath}` : "");
+    setIoMsg(savedPath ? t("exportedTo", { path: savedPath }) : "");
   }
 
   async function doImport(): Promise<void> {
@@ -1265,9 +1393,9 @@ function SettingsModal({
       const s = await api.importSettings();
       applySettings(s);
       onImported(s); // já foi salvo no disco pelo backend; reflete no app também
-      setIoMsg("Configurações importadas ✅");
+      setIoMsg(t("settingsImported"));
     } catch (e) {
-      setIoMsg("Falha ao importar: " + (e as Error).message);
+      setIoMsg(t("importFailed", { msg: (e as Error).message }));
     }
   }
 
@@ -1302,46 +1430,83 @@ function SettingsModal({
     >
       <div className="modal">
         <div className="modal-head">
-          <h2>Configurações</h2>
+          <h2>{t("settings")}</h2>
           <div className="tabs">
+            <button
+              className={`tab ${tab === "languages" ? "active" : ""}`}
+              onClick={() => setTab("languages")}
+            >
+              {t("tabLanguages")}
+            </button>
             <button
               className={`tab ${tab === "checklist" ? "active" : ""}`}
               onClick={() => setTab("checklist")}
             >
-              Checklist
+              {t("tabChecklist")}
             </button>
             <button
               className={`tab ${tab === "download" ? "active" : ""}`}
               onClick={() => setTab("download")}
             >
-              Legendas por Download
+              {t("tabDownload")}
             </button>
             <button
               className={`tab ${tab === "translate" ? "active" : ""}`}
               onClick={() => setTab("translate")}
             >
-              Legendas por Tradução
+              {t("tabTranslate")}
             </button>
             <button
               className={`tab ${tab === "playback" ? "active" : ""}`}
               onClick={() => setTab("playback")}
             >
-              Reprodução
+              {t("tabPlayback")}
             </button>
           </div>
         </div>
 
         <div className="modal-body">
+          {tab === "languages" && (
+            <div className="ai-section">
+              <label>
+                {t("uiLanguageLabel")}
+                <select
+                  value={uiLanguage}
+                  onChange={(e) => setUiLanguage(e.target.value)}
+                >
+                  {UI_LANG_CODES.map((code) => (
+                    <option key={code} value={code}>
+                      {langLabel(code, code)}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                {t("subtitleLangLabel")}
+                <select
+                  value={language}
+                  onChange={(e) => setLanguage(e.target.value)}
+                >
+                  {LANGUAGE_CODES.map((code) => (
+                    <option key={code} value={code}>
+                      {langLabel(settings.uiLanguage, code)}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </div>
+          )}
+
           {tab === "checklist" && (
             <div className="deps">
               <div className="deps-head">
-                <span className="section-label">Dependências externas</span>
+                <span className="section-label">{t("externalDeps")}</span>
                 <button
                   className="ghost sm"
                   onClick={checkDeps}
                   disabled={checkingDeps}
                 >
-                  {checkingDeps ? "Verificando…" : "Reverificar"}
+                  {checkingDeps ? t("checking") : t("recheck")}
                 </button>
               </div>
               <ul className="dep-list">
@@ -1360,7 +1525,7 @@ function SettingsModal({
                     </div>
                   </li>
                 ))}
-                {deps === null && <li className="muted">Verificando…</li>}
+                {deps === null && <li className="muted">{t("checking")}</li>}
               </ul>
             </div>
           )}
@@ -1368,14 +1533,14 @@ function SettingsModal({
           {tab === "download" && (
             <>
               <label>
-                Chave da API do OpenSubtitles
+                {t("osApiKeyLabel")}
                 <div className="key-row">
                   <input
                     type="text"
                     spellCheck={false}
                     autoComplete="off"
                     value={apiKey}
-                    placeholder="cole sua Api-Key aqui"
+                    placeholder={t("pasteApiKeyPlaceholder")}
                     onChange={(e) => {
                       setApiKey(e.target.value);
                       setValidation(null);
@@ -1390,14 +1555,14 @@ function SettingsModal({
                       })
                     }
                   >
-                    Colar
+                    {t("paste")}
                   </button>
                   <button
                     className="ghost sm"
                     onClick={validate}
                     disabled={validating || !apiKey.trim()}
                   >
-                    {validating ? "Validando…" : "Validar"}
+                    {validating ? t("validating") : t("validate")}
                   </button>
                 </div>
               </label>
@@ -1407,7 +1572,7 @@ function SettingsModal({
                 </p>
               )}
               <p className="hint">
-                Não tem uma chave (ou quer gerenciar as suas)?{" "}
+                {t("noApiKeyQuestion")}
                 <a
                   href="https://www.opensubtitles.com/en/consumers"
                   onClick={(e) => {
@@ -1417,83 +1582,49 @@ function SettingsModal({
                     );
                   }}
                 >
-                  Abrir a página de consumers ↗
+                  {t("openConsumers")}
                 </a>
               </p>
-
-              <label>
-                Idioma das legendas a baixar
-                <select
-                  value={language}
-                  onChange={(e) => setLanguage(e.target.value)}
-                >
-                  {LANGUAGES.map((l) => (
-                    <option key={l.code} value={l.code}>
-                      {l.label}
-                    </option>
-                  ))}
-                </select>
-              </label>
             </>
           )}
 
           {tab === "translate" && (
             <div className="ai-section">
               <label>
-                Idioma alvo (destino da tradução)
-                <select
-                  value={language}
-                  onChange={(e) => setLanguage(e.target.value)}
-                >
-                  {LANGUAGES.map((l) => (
-                    <option key={l.code} value={l.code}>
-                      {l.label}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label>
-                Provedor
+                {t("providerLabel")}
                 <select
                   value={provider}
                   onChange={(e) =>
                     setProvider(e.target.value as typeof provider)
                   }
                 >
-                  <option value="apple">
-                    Apple — tradução on-device (macOS 15+)
-                  </option>
-                  <option value="ollama">Ollama (local, offline)</option>
-                  <option value="azure">Azure AI Translator (nuvem)</option>
+                  <option value="apple">{t("providerApple")}</option>
+                  <option value="ollama">{t("providerOllama")}</option>
+                  <option value="azure">{t("providerAzure")}</option>
                 </select>
               </label>
 
               {provider === "apple" && (
-                <p className="hint">
-                  Tradução on-device do macOS: offline, gratuita e sem limite de
-                  taxa — sem chave nem modelo para configurar. Na primeira
-                  tradução, o macOS pode baixar o par de idiomas automaticamente.
-                  Requer macOS 15 (Sequoia) ou superior.
-                </p>
+                <p className="hint">{t("appleHint")}</p>
               )}
 
               {provider === "ollama" && (
                 <>
                   <label>
-                    URL do Ollama
+                    {t("ollamaUrlLabel")}
                     <input
                       value={ollamaUrl}
                       onChange={(e) => setOllamaUrl(e.target.value)}
                     />
                   </label>
                   <label>
-                    Modelo
+                    {t("modelLabel")}
                     <div className="key-row">
                       <select
                         value={ollamaModel}
                         onChange={(e) => setOllamaModel(e.target.value)}
                       >
-                        <option value="">— selecione —</option>
+                        <option value="">{t("selectPlaceholder")}</option>
                         {aiStatus?.models.map((m) => (
                           <option key={m} value={m}>
                             {m}
@@ -1505,13 +1636,13 @@ function SettingsModal({
                         onClick={loadModels}
                         disabled={loadingModels}
                       >
-                        {loadingModels ? "…" : "Recarregar"}
+                        {loadingModels ? "…" : t("reload")}
                       </button>
                     </div>
                   </label>
                   {aiStatus && !aiStatus.available && (
                     <p className="warn">
-                      Ollama não encontrado.{" "}
+                      {t("ollamaNotFound")}
                       <a
                         href="https://ollama.com"
                         onClick={(e) => {
@@ -1519,13 +1650,13 @@ function SettingsModal({
                           api.openExternal("https://ollama.com");
                         }}
                       >
-                        Baixar o Ollama ↗
+                        {t("downloadOllama")}
                       </a>
                     </p>
                   )}
                   {aiStatus?.available && aiStatus.models.length === 0 && (
                     <p className="hint">
-                      Nenhum modelo instalado. Rode, por exemplo,{" "}
+                      {t("noModelInstalled")}
                       <code>ollama pull llama3.1</code>.
                     </p>
                   )}
@@ -1535,14 +1666,14 @@ function SettingsModal({
               {provider === "azure" && (
                 <>
                   <label>
-                    Chave do Azure Translator
+                    {t("azureKeyLabel")}
                     <div className="key-row">
                       <input
                         type="text"
                         spellCheck={false}
                         autoComplete="off"
                         value={azureKey}
-                        placeholder="cole a chave (Ocp-Apim-Subscription-Key)"
+                        placeholder={t("azureKeyPlaceholder")}
                         onChange={(e) => {
                           setAzureKey(e.target.value);
                           setAzureValidation(null);
@@ -1557,7 +1688,7 @@ function SettingsModal({
                           })
                         }
                       >
-                        Colar
+                        {t("paste")}
                       </button>
                       <button
                         className="ghost sm"
@@ -1568,15 +1699,15 @@ function SettingsModal({
                           !azureRegion.trim()
                         }
                       >
-                        {azureValidating ? "Validando…" : "Validar"}
+                        {azureValidating ? t("validating") : t("validate")}
                       </button>
                     </div>
                   </label>
                   <label>
-                    Região
+                    {t("regionLabel")}
                     <input
                       value={azureRegion}
-                      placeholder="ex.: brazilsouth"
+                      placeholder={t("regionPlaceholder")}
                       onChange={(e) => {
                         setAzureRegion(e.target.value);
                         setAzureValidation(null);
@@ -1584,7 +1715,7 @@ function SettingsModal({
                     />
                   </label>
                   <label>
-                    Endpoint
+                    {t("endpointLabel")}
                     <div className="key-row">
                       <input
                         value={azureEndpoint}
@@ -1594,7 +1725,7 @@ function SettingsModal({
                         className="ghost sm"
                         onClick={() => pasteInto(setAzureEndpoint)}
                       >
-                        Colar
+                        {t("paste")}
                       </button>
                     </div>
                   </label>
@@ -1604,8 +1735,9 @@ function SettingsModal({
                     </p>
                   )}
                   <p className="hint">
-                    As credenciais ficam na página <em>Keys and Endpoint</em> do
-                    recurso no portal Azure.
+                    {t("azureHintPre")}
+                    <em>Keys and Endpoint</em>
+                    {t("azureHintPost")}
                   </p>
                 </>
               )}
@@ -1614,25 +1746,24 @@ function SettingsModal({
 
           {tab === "playback" && (
             <div>
-              <span className="section-label">📺 Tocar na TV (Chromecast)</span>
+              <span className="section-label">{t("playbackCastLabel")}</span>
               <label>
-                RAM para o streaming
+                {t("ramForStreaming")}
                 <select
                   value={String(castRamGb)}
                   onChange={(e) => setCastRamGb(Number(e.target.value))}
                 >
-                  <option value="0.25">0,25 GB (econômico)</option>
-                  <option value="0.5">0,5 GB (padrão)</option>
-                  <option value="1">1 GB</option>
-                  <option value="2">2 GB (seek amplo)</option>
-                  <option value="4">4 GB</option>
+                  <option value="0.25">{t("ram025")}</option>
+                  <option value="0.5">{t("ram05")}</option>
+                  <option value="1">{t("ram1")}</option>
+                  <option value="2">{t("ram2")}</option>
+                  <option value="4">{t("ram4")}</option>
                 </select>
               </label>
               <p className="hint">
-                Buffer em memória dos segmentos quando o vídeo precisa ser
-                transcodado pra tocar na TV (ex.: HEVC/x265). Quanto maior, maior
-                o alcance de <strong>seek instantâneo</strong> — ao custo de mais
-                RAM. Fora dessa janela, o seek reinicia o transcode (~1-2s).
+                {t("ramHintPre")}
+                <strong>{t("instantSeek")}</strong>
+                {t("ramHintPost")}
               </p>
             </div>
           )}
@@ -1642,14 +1773,14 @@ function SettingsModal({
 
         <div className="modal-actions">
           <button className="ghost" onClick={doExport}>
-            Exportar…
+            {t("export")}
           </button>
           <button className="ghost" onClick={doImport}>
-            Importar…
+            {t("import")}
           </button>
           <span className="actions-spacer" />
           <button className="ghost" onClick={onClose}>
-            Cancelar
+            {t("cancel")}
           </button>
           <button
             className="primary"
@@ -1657,6 +1788,7 @@ function SettingsModal({
               onSave({
                 apiKey: apiKey.trim(),
                 language,
+                uiLanguage,
                 translationProvider: provider,
                 ollamaUrl: ollamaUrl.trim(),
                 ollamaModel,
@@ -1667,7 +1799,7 @@ function SettingsModal({
               })
             }
           >
-            Salvar
+            {t("save")}
           </button>
         </div>
       </div>

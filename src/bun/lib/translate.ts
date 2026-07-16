@@ -6,6 +6,7 @@ import { logi, logw } from './logger'
 import { ocrMarkerPath, ocrPgsToSrt } from './ocr'
 import { chat } from './ollama'
 import { basename, dirname, extname, joinPath } from './paths'
+import { canonicalLang } from '../../shared/lang'
 import { type Cue, parseSrt, serializeSrt } from './srt'
 
 // Nome legível de cada idioma (para instruir o LLM do Ollama).
@@ -132,10 +133,23 @@ function targetSrtPath(path: string, targetCode: string): string {
   return joinPath(dirname(path), `${base}.${targetCode}.srt`)
 }
 
-/** Caminho do .srt de origem (texto extraído ou OCR). */
+/** Caminho do .srt de origem (texto extraído ou OCR), no código canônico
+ * (a faixa vem como "eng" do ffprobe → o arquivo é `.en.srt`, padrão Jellyfin). */
 function sourceSrtPath(path: string, sourceLanguage: string): string {
   const base = basename(path, extname(path))
-  return joinPath(dirname(path), `${base}.${sourceLanguage}.srt`)
+  return joinPath(dirname(path), `${base}.${canonicalLang(sourceLanguage)}.srt`)
+}
+
+/** Acha o .srt de origem que EXISTE: prefere o canônico (`.en.srt`), mas aceita
+ * o nome legado com o código cru da faixa (`.eng.srt`), gravado por versões
+ * antigas — assim ninguém refaz um OCR caro à toa. */
+async function existingSourceSrt(path: string, sourceLanguage: string): Promise<string> {
+  const canonical = sourceSrtPath(path, sourceLanguage)
+  if (await Bun.file(canonical).exists()) return canonical
+  const base = basename(path, extname(path))
+  const legacy = joinPath(dirname(path), `${base}.${sourceLanguage}.srt`)
+  if (legacy !== canonical && (await Bun.file(legacy).exists())) return legacy
+  return canonical
 }
 
 /**
@@ -150,7 +164,7 @@ async function produceSourceSrt(
   if (args.isText) {
     return (await extractEmbedded(args.path, args.index, args.sourceLanguage, true)).savedPath
   }
-  const cached = sourceSrtPath(args.path, args.sourceLanguage)
+  const cached = await existingSourceSrt(args.path, args.sourceLanguage)
   // Só reusa se o OCR estiver COMPLETO (sem marcador .part); senão retoma.
   const incomplete = await Bun.file(ocrMarkerPath(cached)).exists()
   if (!incomplete && (await Bun.file(cached).exists()) && (await Bun.file(cached).text()).trim().length > 0) {
@@ -174,7 +188,7 @@ export async function getTranslationStatus(
   if (!(await Bun.file(targetPath).exists())) return { done: 0, total: 0 }
   const done = parseSrt(await Bun.file(targetPath).text()).length
   // total: prefere o .srt de origem em disco (vale p/ OCR); senão extrai texto.
-  const src = sourceSrtPath(path, sourceLanguage)
+  const src = await existingSourceSrt(path, sourceLanguage)
   if (await Bun.file(src).exists()) {
     return { done, total: parseSrt(await Bun.file(src).text()).length }
   }
@@ -235,8 +249,10 @@ async function translateSrtCore(
   if (sourceCues.length === 0) throw new Error('A legenda de origem está vazia.')
 
   // Origem e destino podem coincidir se os idiomas forem iguais — não
-  // sobrescreve a fonte com ela mesma.
-  if (targetPath === sourceSrt) {
+  // sobrescreve a fonte com ela mesma. Compara sem caixa: num filesystem
+  // case-insensitive (macOS/Windows) `Filme.pt-br.srt` e `Filme.pt-BR.srt`
+  // são o MESMO arquivo; e num case-sensitive continuam sendo o mesmo idioma.
+  if (targetPath.toLowerCase() === sourceSrt.toLowerCase()) {
     throw new Error('Idioma de origem e destino são iguais — nada a traduzir.')
   }
   // Retoma de um parcial existente, se ele alinhar com a fonte (mesmos timestamps).

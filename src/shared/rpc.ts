@@ -28,7 +28,12 @@ export type LegendaRPC = {
   bun: RPCSchema<{
     requests: {
       selectVideos: { params: Record<string, never>; response: string[] }
-      selectFolder: { params: Record<string, never>; response: string[] }
+      selectFolder: { params: Record<string, never>; response: { dir: string; videos: string[] } }
+      /** Re-varre uma pasta já escolhida (refresh). `ok:false` = inacessível
+       * (ex.: drive ejetado) → a UI não trata como "tudo removido". */
+      listVideosInFolder: { params: { dir: string }; response: { ok: boolean; videos: string[] } }
+      /** Existe no disco? (checagem barata p/ arquivos avulsos no refresh). */
+      pathExists: { params: { path: string }; response: boolean }
       analyzeVideo: { params: { path: string }; response: VideoInfo }
       searchSubtitles: { params: SearchArgs; response: SubtitleResult[] }
       downloadSubtitle: { params: DownloadArgs; response: DownloadResult }

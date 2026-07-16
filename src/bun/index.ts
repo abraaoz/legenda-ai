@@ -102,9 +102,17 @@ const rpc = BrowserView.defineRPC<LegendaRPC>({
           canChooseDirectory: true,
           allowsMultipleSelection: false
         })
-        const dir = dirs.filter((p) => p.length > 0)[0]
-        return dir ? listVideosInFolder(dir) : []
+        const dir = dirs.filter((p) => p.length > 0)[0] ?? ''
+        return { dir, videos: dir ? await listVideosInFolder(dir) : [] }
       }),
+      listVideosInFolder: logged('listVideosInFolder', async ({ dir }) => {
+        // Pasta inacessível (drive ejetado/desmontado) → ok:false, pra o refresh
+        // NÃO interpretar como "todos os vídeos foram removidos".
+        const reachable = (await Bun.$`test -d ${dir}`.quiet().nothrow()).exitCode === 0
+        if (!reachable) return { ok: false, videos: [] }
+        return { ok: true, videos: await listVideosInFolder(dir) }
+      }),
+      pathExists: logged('pathExists', ({ path }) => Bun.file(path).exists()),
       analyzeVideo: logged('analyzeVideo', ({ path }) => analyzeVideo(path)),
       searchSubtitles: logged('searchSubtitles', async ({ video, language }) => {
         const { apiKey } = await getSettings()

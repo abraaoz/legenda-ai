@@ -9,6 +9,7 @@ import { findExternalSubtitles } from './files'
 import { logd, logi } from './logger'
 import { hasOcr } from './ocr'
 import { basename, dirname, extname, joinPath } from './paths'
+import { canonicalLang } from '../../shared/lang'
 import { version } from '../../shared/version'
 
 const API_BASE = 'https://api.opensubtitles.com/api/v1'
@@ -199,7 +200,8 @@ export async function downloadSubtitle(
 
   const ext = extname(result.fileName) || '.srt'
   const base = basename(video.path, extname(video.path))
-  const savedPath = joinPath(dirname(video.path), `${base}.${result.language}${ext}`)
+  // canoniza o código da API (ex.: "pt-br" → "pt-BR") pro sufixo do arquivo
+  const savedPath = joinPath(dirname(video.path), `${base}.${canonicalLang(result.language)}${ext}`)
 
   // Bun.write aceita a Response diretamente e grava o corpo em disco.
   await Bun.write(savedPath, fileRes)
