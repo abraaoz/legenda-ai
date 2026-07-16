@@ -203,6 +203,31 @@ function lanCandidates(ips: string[]): string[] {
   )
 }
 
+type MdnsSocket = { s: { send: (d: Uint8Array, p: number, h: string) => unknown }; ip: string }
+
+/**
+ * Varre o /24 local mandando a query mDNS UNICAST pra cada host:5353.
+ * Motivo: alguns aparelhos (validado: projetor com Google TV) **não respondem à
+ * query multicast**, mas respondem à query direta — e não podemos ouvir o
+ * multicast deles porque o macOS ocupa a porta 5353. São ~254 datagramas
+ * pequenos, rápidos e restritos à própria sub-rede.
+ */
+async function sweepUnicast(sockets: MdnsSocket[], query: Uint8Array): Promise<void> {
+  for (const { s, ip } of sockets) {
+    const base = ip.replace(/\.\d+$/, '')
+    for (let host = 1; host <= 254; host++) {
+      const target = `${base}.${host}`
+      if (target === ip) continue
+      try {
+        s.send(query, MDNS_PORT, target)
+      } catch {
+        // buffer de saída cheio — segue
+      }
+      if (host % 64 === 0) await Bun.sleep(5) // deixa o buffer escoar
+    }
+  }
+}
+
 /**
  * Descobre Chromecasts na LAN. Envia a query mDNS em CADA interface de LAN
  * privada (ignora VPN/CGNAT, que não alcança o multicast local) e coleta as
@@ -233,14 +258,18 @@ export async function discoverCastDevices(timeoutMs = 2500): Promise<CastDevice[
       s.setMulticastInterface?.(ip)
       s.setMulticastTTL?.(4)
       s.send(query, MDNS_PORT, MDNS_ADDR)
-      sockets.push(s)
+      sockets.push({ s, ip })
     } catch {
       // interface que não aceita multicast — ignora
     }
   }
+  // Alguns aparelhos (validado: projetor com Google TV, md=C045RGN) IGNORAM a
+  // query multicast, mas respondem a uma query UNICAST DIRETA. Como o macOS
+  // ocupa a 5353 (não dá pra ouvir o multicast deles), varremos o /24 local.
+  await sweepUnicast(sockets, query)
   const half = Math.min(600, timeoutMs / 2)
   await Bun.sleep(half)
-  for (const s of sockets) {
+  for (const { s } of sockets) {
     try {
       s.send(query, MDNS_PORT, MDNS_ADDR) // reenvia (respostas mDNS podem se perder)
     } catch {
@@ -248,7 +277,7 @@ export async function discoverCastDevices(timeoutMs = 2500): Promise<CastDevice[
     }
   }
   await Bun.sleep(timeoutMs - half)
-  for (const s of sockets) s.close()
+  for (const { s } of sockets) s.close()
   return assemble(tables)
 }
 
