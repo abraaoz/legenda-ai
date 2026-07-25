@@ -1015,18 +1015,20 @@ export default function App() {
                               </span>
                             </div>
                             <div className="btn-group">
-                              <button
-                                className="ghost sm"
-                                title={image ? t("extractImageTitle") : undefined}
-                                disabled={video.extractingIndex === sub.index}
-                                onClick={() => extractEmbedded(video, sub)}
-                              >
-                                {video.extractingIndex === sub.index
-                                  ? t("extracting")
-                                  : image
-                                    ? t("extractSup")
+                              {/* Extrair só para faixas de TEXTO (→ .srt). Em
+                                  imagem (PGS/VobSub) não há extração útil: o
+                                  caminho é Traduzir, que faz OCR. */}
+                              {!image && (
+                                <button
+                                  className="ghost sm"
+                                  disabled={video.extractingIndex === sub.index}
+                                  onClick={() => extractEmbedded(video, sub)}
+                                >
+                                  {video.extractingIndex === sub.index
+                                    ? t("extracting")
                                     : t("extractSrt")}
-                              </button>
+                                </button>
+                              )}
                               <button
                                 className={`sm ${partial ? "continue" : "primary"}`}
                                 title={

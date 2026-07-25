@@ -3,7 +3,7 @@ import { appleLang, appleTranslateBatch, resolveAppleTranslate } from './apple'
 import { type AzureConfig, azureTranslate } from './azure'
 import { extractEmbedded, extractEmbeddedToString } from './ffmpeg'
 import { logi, logw } from './logger'
-import { ocrMarkerPath, ocrPgsToSrt } from './ocr'
+import { ocrImageToSrt, ocrMarkerPath } from './ocr'
 import { chat } from './ollama'
 import { basename, dirname, extname, joinPath } from './paths'
 import { canonicalLang } from '../../shared/lang'
@@ -171,7 +171,7 @@ async function produceSourceSrt(
     logi(`OCR já completo, reusando: ${cached}`)
     return cached
   }
-  return ocrPgsToSrt(args.path, args.index, args.sourceLanguage, onOcrProgress, signal)
+  return ocrImageToSrt(args.path, args.index, args.sourceLanguage, onOcrProgress, signal)
 }
 
 /**
