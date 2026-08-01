@@ -156,6 +156,20 @@ body {
   padding: 32px;
   text-align: center;
   background: var(--panel);
+  transition:
+    border-color 0.12s,
+    background 0.12s;
+}
+.dropzone.drag-active {
+  border-color: var(--accent-2);
+  background: color-mix(in srgb, var(--accent-2) 12%, var(--panel));
+}
+.dropzone.drag-active * {
+  pointer-events: none; /* evita dragleave ao passar sobre os botões */
+}
+.dz-drop-msg {
+  margin-top: 12px;
+  font-size: 13px;
 }
 
 .dz-title {

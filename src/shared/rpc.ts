@@ -43,6 +43,12 @@ export type LegendaRPC = {
       importSettings: { params: Record<string, never>; response: AppSettings }
       validateApiKey: { params: { apiKey: string }; response: ValidateResult }
       extractEmbedded: { params: ExtractArgs; response: DownloadResult }
+      /** OCR de uma faixa EM IMAGEM → .srt no idioma da própria faixa (sem
+       * traduzir). Salva "<nome>.<idioma>.srt" ao lado do vídeo. */
+      ocrExtractEmbedded: {
+        params: { path: string; index: number; language: string }
+        response: DownloadResult
+      }
       listExternalSubtitles: { params: { path: string }; response: ExternalSubtitle[] }
       openExternal: { params: { url: string }; response: boolean }
       readClipboard: { params: Record<string, never>; response: string }

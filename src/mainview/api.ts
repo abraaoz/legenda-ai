@@ -68,6 +68,8 @@ export const api = {
   listVideosInFolder: (dir: string) => call.listVideosInFolder({ dir }),
   pathExists: (path: string) => call.pathExists({ path }),
   analyzeVideo: (path: string) => call.analyzeVideo({ path }),
+  ocrExtractEmbedded: (path: string, index: number, language: string) =>
+    call.ocrExtractEmbedded({ path, index, language }),
   searchSubtitles: (args: SearchArgs) => call.searchSubtitles(args),
   downloadSubtitle: (args: DownloadArgs) => call.downloadSubtitle(args),
   getSettings: () => call.getSettings({}),

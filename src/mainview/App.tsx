@@ -162,6 +162,8 @@ export default function App() {
   const [videos, setVideos] = useState<VideoState[]>([]);
   const [picking, setPicking] = useState(false);
   const [pickingFolder, setPickingFolder] = useState(false);
+  const [dragActive, setDragActive] = useState(false);
+  const [dropMsg, setDropMsg] = useState("");
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const logBodyRef = useRef<HTMLDivElement>(null);
 
@@ -203,6 +205,18 @@ export default function App() {
       setSettings(s);
       if (!s.apiKey) setShowSettings(true);
     });
+  }, []);
+
+  // Impede o webview de NAVEGAR para o arquivo ao soltá-lo fora da dropzone
+  // (comportamento padrão do WKWebView). A dropzone trata o seu próprio drop.
+  useEffect(() => {
+    const prevent = (e: DragEvent): void => e.preventDefault();
+    window.addEventListener("dragover", prevent);
+    window.addEventListener("drop", prevent);
+    return () => {
+      window.removeEventListener("dragover", prevent);
+      window.removeEventListener("drop", prevent);
+    };
   }, []);
 
   // Re-varre o disco quando a janela volta ao foco (arquivos podem ter sido
@@ -352,6 +366,60 @@ export default function App() {
     }
   }
 
+  // --- Arrastar e soltar vídeos ---
+  const VIDEO_EXTS = new Set([
+    "mkv", "mp4", "m4v", "avi", "mov", "webm", "ts", "mpg", "mpeg", "wmv", "flv", "m2ts",
+  ]);
+  const isVideo = (p: string): boolean =>
+    VIDEO_EXTS.has((p.split(".").pop() ?? "").toLowerCase());
+
+  /** Extrai caminhos absolutos do drop. Webviews não expõem o path direto no
+   * File; a via confiável no WebKit é o `text/uri-list` (URLs file://). Tenta
+   * também `File.path` (estilo Electron) por garantia. */
+  function pathsFromDrop(dt: DataTransfer): string[] {
+    const out = new Set<string>();
+    for (const type of ["text/uri-list", "text/plain"]) {
+      const data = dt.getData(type);
+      if (!data) continue;
+      for (const raw of data.split(/[\r\n]+/)) {
+        const line = raw.trim();
+        if (!line || line.startsWith("#")) continue;
+        if (line.startsWith("file://")) {
+          try {
+            out.add(decodeURIComponent(new URL(line).pathname));
+          } catch {
+            // ignora linha malformada
+          }
+        } else if (line.startsWith("/")) {
+          out.add(line);
+        }
+      }
+    }
+    for (const f of Array.from(dt.files)) {
+      const p = (f as unknown as { path?: string }).path;
+      if (p) out.add(p);
+    }
+    return [...out];
+  }
+
+  async function handleDrop(e: React.DragEvent): Promise<void> {
+    e.preventDefault();
+    setDragActive(false);
+    const all = pathsFromDrop(e.dataTransfer);
+    const vids = all.filter(isVideo);
+    if (vids.length) {
+      setDropMsg("");
+      // adiciona a pasta como raiz (pra refresh) e os vídeos
+      const dirs = [...new Set(vids.map(folderOf))];
+      setRoots((r) => [...new Set([...r, ...dirs])]);
+      await addPaths(vids);
+      return;
+    }
+    // O webview nativo não expõe o caminho do arquivo (limitação de segurança
+    // do WKWebView; o Electrobun não tem drag-drop nativo). Orienta o botão.
+    setDropMsg(t("dropUnsupported"));
+  }
+
   /**
    * Reconcilia a lista com o disco: re-varre as pastas escolhidas (adiciona
    * novos, remove os que sumiram/renomearam) e atualiza legendas+status dos
@@ -489,6 +557,46 @@ export default function App() {
     const info = video.info;
     patch(video.id, { queuedIndex: sub.index, message: undefined });
     qEnqueue(`${video.id}:${sub.index}`, () => runTranslate(video.id, info, sub));
+  }
+
+  // Enfileira SÓ o OCR de uma faixa em imagem → .srt no idioma da própria faixa
+  // (sem traduzir). Mesma fila de máx. 2.
+  function ocrExtract(video: VideoState, sub: EmbeddedSubtitle): void {
+    if (!video.info || sub.isText || !video.info.ocrAvailable) return;
+    const info = video.info;
+    patch(video.id, { queuedIndex: sub.index, message: undefined });
+    qEnqueue(`${video.id}:ocr:${sub.index}`, () =>
+      runOcrExtract(video.id, info, sub),
+    );
+  }
+
+  async function runOcrExtract(
+    videoId: string,
+    info: VideoInfo,
+    sub: EmbeddedSubtitle,
+  ): Promise<void> {
+    patch(videoId, {
+      queuedIndex: undefined,
+      translatingIndex: sub.index, // liga a barra de progresso
+      extractingIndex: sub.index, // marca que é EXTRAÇÃO (rótulo do botão)
+      translateDone: 0,
+      translateTotal: 0,
+      translatePhase: "ocr",
+    });
+    try {
+      await api.ocrExtractEmbedded(info.path, sub.index, sub.language);
+      patch(videoId, {
+        translatingIndex: undefined,
+        extractingIndex: undefined,
+      });
+      void refreshExternal(videoId, info.path); // a .srt nova aparece na lista
+    } catch (err) {
+      patch(videoId, {
+        translatingIndex: undefined,
+        extractingIndex: undefined,
+        message: (err as Error).message,
+      });
+    }
   }
 
   // Executa de fato a tradução (chamado pela fila quando há vaga).
@@ -778,7 +886,19 @@ export default function App() {
             </div>
           )}
 
-          <section className="dropzone">
+          <section
+            className={`dropzone ${dragActive ? "drag-active" : ""}`}
+            onDragOver={(e) => {
+              e.preventDefault();
+              if (!dragActive) setDragActive(true);
+            }}
+            onDragEnter={(e) => e.preventDefault()}
+            onDragLeave={(e) => {
+              // só desativa ao sair de fato da seção (não dos filhos)
+              if (e.currentTarget === e.target) setDragActive(false);
+            }}
+            onDrop={(e) => void handleDrop(e)}
+          >
             <p className="dz-title">{t("addYourVideos")}</p>
             <div className="dz-actions">
               <button
@@ -796,6 +916,7 @@ export default function App() {
                 {pickingFolder ? t("scanningFolder") : `📁 ${t("selectFolder")}`}
               </button>
             </div>
+            {dropMsg && <p className="warn dz-drop-msg">{dropMsg}</p>}
             {!settings.apiKey && <p className="warn">{t("apiKeyWarning")}</p>}
           </section>
 
@@ -1015,9 +1136,7 @@ export default function App() {
                               </span>
                             </div>
                             <div className="btn-group">
-                              {/* Extrair só para faixas de TEXTO (→ .srt). Em
-                                  imagem (PGS/VobSub) não há extração útil: o
-                                  caminho é Traduzir, que faz OCR. */}
+                              {/* Texto → extração direta (ffmpeg → .srt). */}
                               {!image && (
                                 <button
                                   className="ghost sm"
@@ -1027,6 +1146,20 @@ export default function App() {
                                   {video.extractingIndex === sub.index
                                     ? t("extracting")
                                     : t("extractSrt")}
+                                </button>
+                              )}
+                              {/* Imagem → OCR na língua da própria faixa (sem
+                                  traduzir), produz "<nome>.<idioma>.srt". */}
+                              {canOcr && (
+                                <button
+                                  className="ghost sm"
+                                  disabled={busy}
+                                  title={t("extractOcrTitle")}
+                                  onClick={() => ocrExtract(video, sub)}
+                                >
+                                  {video.extractingIndex === sub.index
+                                    ? t("extracting")
+                                    : t("extractOcr")}
                                 </button>
                               )}
                               <button

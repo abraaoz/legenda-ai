@@ -7,6 +7,7 @@ import { findExternalSubtitles, listVideosInFolder } from './lib/files'
 import { extractEmbedded } from './lib/ffmpeg'
 import { saveFileDialog } from './lib/savedialog'
 import { getLogBuffer, loge, logi, setLogSink } from './lib/logger'
+import { ocrImageToSrt } from './lib/ocr'
 import { listModels } from './lib/ollama'
 import {
   analyzeVideo,
@@ -187,6 +188,23 @@ const rpc = BrowserView.defineRPC<LegendaRPC>({
           }
         }
       ),
+      ocrExtractEmbedded: logged('ocrExtractEmbedded', async ({ path, index, language }) => {
+        // OCR-only: produz o .srt no idioma da faixa, sem traduzir.
+        const controller = new AbortController()
+        activeTranslations.set(path, controller)
+        try {
+          const savedPath = await ocrImageToSrt(
+            path,
+            index,
+            language,
+            (done, total) => sendProgress({ path, done, total, phase: 'ocr' }),
+            controller.signal
+          )
+          return { savedPath }
+        } finally {
+          activeTranslations.delete(path)
+        }
+      }),
       aiTranslateSrt: logged('aiTranslateSrt', async ({ videoPath, srtPath, sourceLanguage }) => {
         const s = await getSettings()
         const translator = await pickTranslator(s, sourceLanguage)
