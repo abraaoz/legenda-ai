@@ -60,6 +60,8 @@ jobs:
           name: ${{ matrix.name }}
           path: artifacts/*
           if-no-files-found: error
+          # O Release guarda a cópia definitiva; a do run só precisa chegar ao job release.
+          retention-days: 3
 
   release:
     name: Publicar release
